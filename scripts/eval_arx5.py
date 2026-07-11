@@ -54,6 +54,9 @@ from utils.cv_util import draw_predefined_mask
 from peripherals.spacemouse_shared_memory import Spacemouse
 from utils.pose_util import pose_to_mat, mat_to_pose, rot6d_to_mat
 import scipy.spatial.transform as st
+
+from peripherals.keyboard_teleop import KeyboardTeleop
+
 from modules.arx5_env import Arx5Env
 import zmq
 
@@ -173,6 +176,8 @@ def solve_sphere_collision(ee_poses, robots_config):
 @click.option("-ci", "--camera_intrinsics", type=str, default=None)
 @click.option("--mirror_swap", is_flag=True, default=False)
 @click.option("--task_name", type=str, default='')
+@click.option("--teleop-device",type=click.Choice(["keyboard", "spacemouse"]), default="keyboard",show_default=True,)
+
 def main(
     input,
     output,
@@ -193,6 +198,8 @@ def main(
     camera_intrinsics,
     mirror_swap,
     task_name,
+    teleop_device,
+
 ):
     pid = os.getpid()
     os.sched_setaffinity(pid, [7])
@@ -289,9 +296,17 @@ def main(
 
     print("steps_per_inference:", steps_per_inference)
     with SharedMemoryManager() as shm_manager:
-        with Spacemouse(
-            shm_manager=shm_manager, deadzone=0.1
-        ) as sm, KeystrokeCounter() as key_counter, Arx5Env(
+        if teleop_device == "keyboard":
+            teleop = KeyboardTeleop(
+                fine_scale=0.1,
+                fast_scale=0.5,
+            )
+        else:
+            teleop = Spacemouse(
+                shm_manager=shm_manager,
+                deadzone=0.1,
+            )
+        with teleop as sm, KeystrokeCounter() as key_counter, Arx5Env(
             output_dir=output,
             robots_config=robots_config,
             frequency=frequency,
