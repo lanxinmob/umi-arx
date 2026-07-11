@@ -4,6 +4,7 @@ import numpy as np
 import time
 import shutil
 import math
+import os
 from multiprocessing.managers import SharedMemoryManager
 from modules.arx5_controller import Arx5Controller
 from peripherals.multi_uvc_camera import MultiUvcCamera, VideoRecorder
@@ -68,11 +69,15 @@ class Arx5Env:
 
         # Wait for all v4l cameras to be back online
         time.sleep(0.1)
-        v4l_paths = get_sorted_v4l_paths()
-        if camera_reorder is not None:
-            paths = [v4l_paths[i] for i in camera_reorder]
-            v4l_paths = paths
-
+        phone_cam = os.environ.get("UMI_ARX_CAMERA")
+        if phone_cam:
+            v4l_paths = [phone_cam]
+        else:
+            v4l_paths = get_sorted_v4l_paths()
+            if camera_reorder is not None:
+                paths = [v4l_paths[i] for i in camera_reorder]
+                v4l_paths = paths
+        print("using camera path:",v4l_paths)
         # compute resolution for vis
         rw, rh, col, row = optimal_row_cols(
             n_cameras=len(v4l_paths),

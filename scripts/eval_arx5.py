@@ -25,6 +25,7 @@ import sys
 import os
 from queue import Queue
 from omegaconf import open_dict
+import dill
 
 ROOT_DIR = os.path.dirname(os.path.dirname(__file__))
 sys.path.append(ROOT_DIR)
@@ -243,12 +244,12 @@ def main(
     ckpt_path = input
     if not ckpt_path.endswith(".ckpt"):
         ckpt_path = os.path.join(ckpt_path, "checkpoints", "latest.ckpt")
-    cfg_path = ckpt_path.replace(".ckpt", ".yaml")
-    with open(cfg_path, "r") as f:
-        cfg = OmegaConf.load(f)
-    # import torch
-    # payload = torch.load(open(ckpt_path, 'rb'), map_location='cpu', pickle_module=dill)
-    # cfg = payload['cfg']
+    #cfg_path = ckpt_path.replace(".ckpt", ".yaml")
+    #with open(cfg_path, "r") as f:
+    #    cfg = OmegaConf.load(f)
+    import torch
+    payload = torch.load(open(ckpt_path, 'rb'), map_location='cpu', pickle_module=dill)
+    cfg = payload['cfg']
     
     obs_pose_rep = cfg.task.pose_repr.obs_pose_repr
     action_pose_repr = cfg.task.pose_repr.action_pose_repr
@@ -440,6 +441,15 @@ def main(
                         vis_img = np.concatenate(
                             [obs_left_img, vis_img], axis=1
                         )
+                    vis_img = np.asarray(vis_img)
+                    if vis_img.dtype != np.uint8:
+                        if vis_img.min()>= 0.0 and vis_img.max()<=1.0:
+                            vis_img = (np.clip(vis_img, 0.0, 1.0)* 255.0).round().astype(np.uint8)
+                        elif vis_img.min()>= -1.0 and vis_img.max()<=1.0:
+                            vis_img = ((np.clip(vis_img, -1.0, 1.0) + 1.0)* 127.5).round().astype(np.uint8)
+                        else:
+                            vis_img = np.clip(vis_img, 0, 255).astype(np.uint8)
+                    vis_img = np.ascontiguousarray(vis_img.copy())
 
                     text = f"Episode: {episode_id}, matching: {match_episode} ({match_dataset_path})"
                     cv2.putText(
@@ -791,6 +801,15 @@ def main(
                         text = "Episode: {}, Time: {:.1f}".format(
                             episode_id, time.monotonic() - t_start
                         )
+                        vis_img = np.asarray(vis_img)
+                        if vis_img.dtype != np.uint8:
+                            if vis_img.min()>= 0.0 and vis_img.max()<=1.0:
+                                vis_img = (np.clip(vis_img, 0.0, 1.0)* 255.0).round().astype(np.uint8)
+                            elif vis_img.min()>= -1.0 and vis_img.max()<=1.0:
+                                vis_img = ((np.clip(vis_img, -1.0, 1.0) + 1.0)* 127.5).round().astype(np.uint8)
+                            else:
+                                vis_img = np.clip(vis_img, 0, 255).astype(np.uint8)
+                        vis_img = np.ascontiguousarray(vis_img.copy())
                         cv2.putText(
                             vis_img,
                             text,
