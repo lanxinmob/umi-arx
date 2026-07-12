@@ -242,7 +242,6 @@ class UvcCamera(mp.Process):
             if put_start_time is None:
                 put_start_time = time.time()
 
-            # reuse frame buffer
             iter_idx = 0
             t_start = time.time()
             while not self.stop_event.is_set():
@@ -250,9 +249,10 @@ class UvcCamera(mp.Process):
                 ret = cap.grab()
                 assert ret
 
-                # directly write into shared memory to avoid copy
-                frame = self.video_recorder.get_img_buffer()
-                ret, frame = cap.retrieve(frame)
+                # OpenCV 5 no longer reliably accepts a preallocated ndarray in
+                # VideoCapture.retrieve(). Retrieve normally, then copy into the
+                # recorder's shared buffer only while recording.
+                ret, frame = cap.retrieve()
                 t_recv = time.time()
                 assert ret
                 mt_cap = cap.get(cv2.CAP_PROP_POS_MSEC) / 1000
@@ -261,7 +261,16 @@ class UvcCamera(mp.Process):
 
                 # record frame
                 if self.video_recorder.is_ready():
-                    self.video_recorder.write_img_buffer(frame, frame_time=t_cal)
+                    record_buffer = self.video_recorder.get_img_buffer()
+                    if record_buffer.shape != frame.shape:
+                        raise RuntimeError(
+                            "Camera frame shape changed from "
+                            f"{record_buffer.shape} to {frame.shape}"
+                        )
+                    np.copyto(record_buffer, frame)
+                    self.video_recorder.write_img_buffer(
+                        record_buffer, frame_time=t_cal
+                    )
 
                 data = dict()
                 data["camera_receive_timestamp"] = t_cap

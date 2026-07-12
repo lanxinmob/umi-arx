@@ -72,8 +72,8 @@ class GamepadTeleopTest(unittest.TestCase):
         self.teleop = GamepadTeleop(deadzone=0.1, scale=0.5)
         self.teleop._load_evdev = lambda: FakeEvdev
         self.teleop._connected = True
-        stick = SimpleNamespace(minimum=-32768, maximum=32767, value=0)
-        trigger = SimpleNamespace(minimum=0, maximum=255, value=0)
+        stick = SimpleNamespace(min=-32768, max=32767, value=0)
+        trigger = SimpleNamespace(min=0, max=255, value=0)
         self.teleop._axis_info = {
             FakeEcodes.ABS_X: stick,
             FakeEcodes.ABS_Y: stick,

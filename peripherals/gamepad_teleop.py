@@ -178,8 +178,8 @@ class GamepadTeleop:
     def _normalize_stick(self, code):
         info = self._axis_info[code]
         value = self._axis_values.get(code, info.value)
-        center = (info.minimum + info.maximum) / 2.0
-        span = (info.maximum - info.minimum) / 2.0
+        center = (info.min + info.max) / 2.0
+        span = (info.max - info.min) / 2.0
         normalized = 0.0 if span <= 0 else (value - center) / span
         normalized = float(np.clip(normalized, -1.0, 1.0))
         magnitude = abs(normalized)
@@ -191,11 +191,11 @@ class GamepadTeleop:
 
     def _normalize_trigger(self, code):
         info = self._axis_info[code]
-        value = self._axis_values.get(code, info.minimum)
-        span = info.maximum - info.minimum
+        value = self._axis_values.get(code, info.min)
+        span = info.max - info.min
         if span <= 0:
             return 0.0
-        return float(np.clip((value - info.minimum) / span, 0.0, 1.0))
+        return float(np.clip((value - info.min) / span, 0.0, 1.0))
 
     def get_motion_state_transformed(self):
         evdev = self._load_evdev()
