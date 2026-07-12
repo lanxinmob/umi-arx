@@ -39,6 +39,7 @@ class UvcCamera(mp.Process):
         dev_video_path,
         resolution=(1280, 720),
         capture_fps=60,
+        capture_fourcc=None,
         put_fps=None,
         put_downsample=True,
         get_max_k=30,
@@ -125,6 +126,7 @@ class UvcCamera(mp.Process):
         self.dev_video_path = dev_video_path
         self.resolution = resolution
         self.capture_fps = capture_fps
+        self.capture_fourcc = capture_fourcc
         self.put_fps = put_fps
         self.put_downsample = put_downsample
         self.receive_latency = receive_latency
@@ -227,13 +229,31 @@ class UvcCamera(mp.Process):
             # set resolution and fps
             w, h = self.resolution
             fps = self.capture_fps
+            if self.capture_fourcc is not None:
+                if len(self.capture_fourcc) != 4:
+                    raise ValueError("capture_fourcc must contain exactly 4 characters")
+                fourcc = cv2.VideoWriter_fourcc(*self.capture_fourcc)
+                if not cap.set(cv2.CAP_PROP_FOURCC, fourcc):
+                    raise RuntimeError(
+                        f"Camera rejected pixel format {self.capture_fourcc}"
+                    )
             cap.set(cv2.CAP_PROP_FRAME_WIDTH, w)
             cap.set(cv2.CAP_PROP_FRAME_HEIGHT, h)
             # set fps
             cap.set(cv2.CAP_PROP_BUFFERSIZE, self.cap_buffer_size)
             cap.set(cv2.CAP_PROP_FPS, fps)
+            actual_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            actual_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            actual_fps = cap.get(cv2.CAP_PROP_FPS)
+            actual_fourcc_value = int(cap.get(cv2.CAP_PROP_FOURCC))
+            actual_fourcc = "".join(
+                chr((actual_fourcc_value >> (8 * i)) & 0xFF) for i in range(4)
+            )
             print(
-                f"UvcCamera {self.dev_video_path} set resolution {w}x{h} and fps {fps}, buffer size {self.cap_buffer_size}"
+                f"UvcCamera {self.dev_video_path} requested {w}x{h}@{fps}, "
+                f"format {self.capture_fourcc or 'driver-default'}; driver reports "
+                f"{actual_w}x{actual_h}@{actual_fps:g} {actual_fourcc}, "
+                f"buffer size {self.cap_buffer_size}"
             )
 
             # put frequency regulation
@@ -255,6 +275,16 @@ class UvcCamera(mp.Process):
                 ret, frame = cap.retrieve()
                 t_recv = time.time()
                 assert ret
+                expected_shape = (h, w, 3)
+                if frame.shape != expected_shape:
+                    raise RuntimeError(
+                        f"Camera returned frame shape {frame.shape}, but "
+                        f"{expected_shape} was requested. The capture device does "
+                        "not support the configured resolution/FPS/pixel-format "
+                        "combination. Inspect it with `v4l2-ctl "
+                        f"--list-formats-ext -d {self.dev_video_path}` and choose "
+                        "a supported mode in modules/arx5_env.py."
+                    )
                 mt_cap = cap.get(cv2.CAP_PROP_POS_MSEC) / 1000
                 t_cap = mt_cap - time.monotonic() + time.time()
                 t_cal = t_recv - self.receive_latency  # calibrated latency

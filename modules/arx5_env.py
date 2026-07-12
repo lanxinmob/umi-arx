@@ -90,6 +90,7 @@ class Arx5Env:
         # Other capture card records at 720p 60fps
         resolution = list()
         capture_fps = list()
+        capture_fourcc = list()
         cap_buffer_size = list()
         video_recorder = list()
         transform = list()
@@ -100,6 +101,7 @@ class Arx5Env:
                 fps = 30
                 buf = 3
                 bit_rate = 6000 * 1000
+                fourcc = None
 
                 def tf4k(data, input_res=res):
                     img = data["color"]
@@ -121,6 +123,8 @@ class Arx5Env:
                 fps = 60
                 buf = 1
                 bit_rate = 3000 * 1000
+                # This capture-card class exposes 1080p60 only in MJPG mode.
+                fourcc = "MJPG"
 
                 is_mirror = None
                 if mirror_swap:
@@ -166,6 +170,7 @@ class Arx5Env:
 
             resolution.append(res)
             capture_fps.append(fps)
+            capture_fourcc.append(fourcc)
             cap_buffer_size.append(buf)
             video_recorder.append(
                 VideoRecorder.create_hevc_nvenc(
@@ -189,6 +194,7 @@ class Arx5Env:
             shm_manager=shm_manager,
             resolution=resolution,
             capture_fps=capture_fps,
+            capture_fourcc=capture_fourcc,
             # send every frame immediately after arrival
             # ignores put_fps
             put_downsample=False,

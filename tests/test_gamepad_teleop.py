@@ -17,6 +17,8 @@ class FakeEcodes:
     ABS_RZ = 5
     BTN_TL = 310
     BTN_TR = 311
+    BTN_SOUTH = 304
+    BTN_EAST = 305
     BTN_SELECT = 314
     BTN_START = 315
 
@@ -47,6 +49,8 @@ class FakeInputDevice:
         return {
             FakeEcodes.EV_ABS: axes,
             FakeEcodes.EV_KEY: [
+                FakeEcodes.BTN_SOUTH,
+                FakeEcodes.BTN_EAST,
                 FakeEcodes.BTN_TL,
                 FakeEcodes.BTN_TR,
                 FakeEcodes.BTN_SELECT,
@@ -117,7 +121,7 @@ class GamepadTeleopTest(unittest.TestCase):
             self.teleop.get_motion_state_transformed(), np.zeros(6)
         )
 
-    def test_home_combo_is_one_shot_and_gripper_is_disabled(self):
+    def test_home_combo_is_one_shot(self):
         self.teleop._pressed_buttons.update(
             {FakeEcodes.BTN_SELECT, FakeEcodes.BTN_START}
         )
@@ -125,8 +129,16 @@ class GamepadTeleopTest(unittest.TestCase):
 
         self.assertTrue(self.teleop.consume_reset_request())
         self.assertFalse(self.teleop.consume_reset_request())
-        self.assertFalse(self.teleop.is_button_pressed(0))
+
+    def test_a_closes_and_b_opens_gripper(self):
+        self.teleop._pressed_buttons.add(FakeEcodes.BTN_SOUTH)
+        self.assertTrue(self.teleop.is_button_pressed(0))
         self.assertFalse(self.teleop.is_button_pressed(1))
+
+        self.teleop._pressed_buttons.clear()
+        self.teleop._pressed_buttons.add(FakeEcodes.BTN_EAST)
+        self.assertFalse(self.teleop.is_button_pressed(0))
+        self.assertTrue(self.teleop.is_button_pressed(1))
 
     def test_detection_requests_plain_axis_codes_from_evdev(self):
         teleop = GamepadTeleop(device_path="/dev/input/event19")

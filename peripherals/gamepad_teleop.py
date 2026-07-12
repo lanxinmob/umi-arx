@@ -72,6 +72,8 @@ class GamepadTeleop:
             evdev.ecodes.ABS_RZ,
         }
         required_buttons = {
+            evdev.ecodes.BTN_SOUTH,
+            evdev.ecodes.BTN_EAST,
             evdev.ecodes.BTN_TL,
             evdev.ecodes.BTN_TR,
             evdev.ecodes.BTN_SELECT,
@@ -229,10 +231,16 @@ class GamepadTeleop:
         return state * self.scale
 
     def is_button_pressed(self, button_id):
-        """Gamepad gripper control is intentionally disabled."""
-        if button_id not in (0, 1):
+        """Match SpaceMouse buttons: A closes and B opens the gripper."""
+        evdev = self._load_evdev()
+        button_codes = {
+            0: evdev.ecodes.BTN_SOUTH,  # Xbox A
+            1: evdev.ecodes.BTN_EAST,  # Xbox B
+        }
+        if button_id not in button_codes:
             raise ValueError(f"Unknown button id: {button_id}")
-        return False
+        with self._lock:
+            return button_codes[button_id] in self._pressed_buttons
 
     def consume_reset_request(self):
         """Consume the rising edge of the Back + Start reset combination."""
