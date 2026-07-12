@@ -72,8 +72,8 @@ class GamepadTeleop:
             evdev.ecodes.ABS_RZ,
         }
         required_buttons = {
-            evdev.ecodes.BTN_SOUTH,
-            evdev.ecodes.BTN_EAST,
+            evdev.ecodes.BTN_A,
+            evdev.ecodes.BTN_B,
             evdev.ecodes.BTN_TL,
             evdev.ecodes.BTN_TR,
             evdev.ecodes.BTN_SELECT,
