@@ -52,6 +52,7 @@ from utils.real_inference_util import (
 )
 from utils.cv_util import draw_predefined_mask
 from peripherals.spacemouse_shared_memory import Spacemouse
+from peripherals.gamepad_teleop import GamepadTeleop
 from utils.pose_util import pose_to_mat, mat_to_pose, rot6d_to_mat
 import scipy.spatial.transform as st
 
@@ -176,7 +177,31 @@ def solve_sphere_collision(ee_poses, robots_config):
 @click.option("-ci", "--camera_intrinsics", type=str, default=None)
 @click.option("--mirror_swap", is_flag=True, default=False)
 @click.option("--task_name", type=str, default='')
-@click.option("--teleop-device",type=click.Choice(["keyboard", "spacemouse"]), default="keyboard",show_default=True,)
+@click.option(
+    "--teleop-device",
+    type=click.Choice(["keyboard", "spacemouse", "gamepad"]),
+    default="keyboard",
+    show_default=True,
+)
+@click.option(
+    "--gamepad-device",
+    type=click.Path(exists=True, dir_okay=False),
+    default=None,
+    help="Linux input event path, e.g. /dev/input/event12. Auto-detect by default.",
+)
+@click.option(
+    "--gamepad-deadzone",
+    type=click.FloatRange(min=0.0, max=0.99),
+    default=0.12,
+    show_default=True,
+)
+@click.option(
+    "--gamepad-scale",
+    type=click.FloatRange(min=0.01, max=1.0),
+    default=0.5,
+    show_default=True,
+    help="Maximum gamepad motion output before eval speed scaling.",
+)
 
 def main(
     input,
@@ -199,6 +224,9 @@ def main(
     mirror_swap,
     task_name,
     teleop_device,
+    gamepad_device,
+    gamepad_deadzone,
+    gamepad_scale,
 
 ):
     pid = os.getpid()
@@ -301,10 +329,16 @@ def main(
                 fine_scale=0.1,
                 fast_scale=0.5,
             )
-        else:
+        elif teleop_device == "spacemouse":
             teleop = Spacemouse(
                 shm_manager=shm_manager,
                 deadzone=0.1,
+            )
+        else:
+            teleop = GamepadTeleop(
+                device_path=gamepad_device,
+                deadzone=gamepad_deadzone,
+                scale=gamepad_scale,
             )
         with teleop as sm, KeystrokeCounter() as key_counter, Arx5Env(
             output_dir=output,
@@ -570,7 +604,14 @@ def main(
                         # target_pose[robot_idx, 2] = np.maximum(target_pose[robot_idx, 2], 0.055)
 
                     dpos = 0
-                    if sm.is_button_pressed(0) and sm.is_button_pressed(1):
+                    if hasattr(sm, "consume_reset_request"):
+                        reset_requested = sm.consume_reset_request()
+                    else:
+                        reset_requested = (
+                            sm.is_button_pressed(0) and sm.is_button_pressed(1)
+                        )
+
+                    if reset_requested:
                         print("Reset robot arm to home. Please wait...")
                         for robot_idx in control_robot_idx_list:
                             env.robots[robot_idx].reset_to_home()
