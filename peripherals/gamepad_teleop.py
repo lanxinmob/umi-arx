@@ -88,11 +88,18 @@ class GamepadTeleop:
             try:
                 device = evdev.InputDevice(path)
                 inspected.append(f"{path}: {device.name}")
-                device_caps = device.capabilities()
+                # evdev defaults to absinfo=True, which returns EV_ABS entries as
+                # (axis_code, AbsInfo) tuples. Detection needs plain integer codes.
+                device_caps = device.capabilities(absinfo=False)
                 axes = set(device_caps.get(evdev.ecodes.EV_ABS, []))
                 buttons = set(device_caps.get(evdev.ecodes.EV_KEY, []))
                 if required_axes.issubset(axes) and required_buttons.issubset(buttons):
                     return device
+                missing_axes = sorted(required_axes - axes)
+                missing_buttons = sorted(required_buttons - buttons)
+                inspected[-1] += (
+                    f" (missing axes={missing_axes}, buttons={missing_buttons})"
+                )
                 device.close()
             except OSError as exc:
                 inspected.append(f"{path}: unavailable ({exc})")

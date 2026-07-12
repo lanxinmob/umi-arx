@@ -7,6 +7,8 @@ from peripherals.gamepad_teleop import GamepadTeleop
 
 
 class FakeEcodes:
+    EV_KEY = 1
+    EV_ABS = 3
     ABS_X = 0
     ABS_Y = 1
     ABS_Z = 2
@@ -21,6 +23,48 @@ class FakeEcodes:
 
 class FakeEvdev:
     ecodes = FakeEcodes
+
+
+class FakeInputDevice:
+    last_absinfo = None
+
+    def __init__(self, path):
+        self.path = path
+        self.name = "Microsoft X-Box 360 pad"
+
+    def capabilities(self, absinfo=True):
+        FakeInputDevice.last_absinfo = absinfo
+        axes = [
+            FakeEcodes.ABS_X,
+            FakeEcodes.ABS_Y,
+            FakeEcodes.ABS_Z,
+            FakeEcodes.ABS_RX,
+            FakeEcodes.ABS_RY,
+            FakeEcodes.ABS_RZ,
+        ]
+        if absinfo:
+            axes = [(code, SimpleNamespace()) for code in axes]
+        return {
+            FakeEcodes.EV_ABS: axes,
+            FakeEcodes.EV_KEY: [
+                FakeEcodes.BTN_TL,
+                FakeEcodes.BTN_TR,
+                FakeEcodes.BTN_SELECT,
+                FakeEcodes.BTN_START,
+            ],
+        }
+
+    def close(self):
+        pass
+
+
+class FakeDiscoveryEvdev:
+    ecodes = FakeEcodes
+    InputDevice = FakeInputDevice
+
+    @staticmethod
+    def list_devices():
+        return ["/dev/input/event19"]
 
 
 class GamepadTeleopTest(unittest.TestCase):
@@ -83,6 +127,14 @@ class GamepadTeleopTest(unittest.TestCase):
         self.assertFalse(self.teleop.consume_reset_request())
         self.assertFalse(self.teleop.is_button_pressed(0))
         self.assertFalse(self.teleop.is_button_pressed(1))
+
+    def test_detection_requests_plain_axis_codes_from_evdev(self):
+        teleop = GamepadTeleop(device_path="/dev/input/event19")
+
+        device = teleop._find_device(FakeDiscoveryEvdev)
+
+        self.assertEqual(device.name, "Microsoft X-Box 360 pad")
+        self.assertFalse(FakeInputDevice.last_absinfo)
 
 
 if __name__ == "__main__":
