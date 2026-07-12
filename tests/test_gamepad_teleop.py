@@ -17,8 +17,8 @@ class FakeEcodes:
     ABS_RZ = 5
     BTN_TL = 310
     BTN_TR = 311
-    BTN_SOUTH = 304
-    BTN_EAST = 305
+    BTN_A = 304
+    BTN_B = 305
     BTN_SELECT = 314
     BTN_START = 315
 
@@ -49,8 +49,8 @@ class FakeInputDevice:
         return {
             FakeEcodes.EV_ABS: axes,
             FakeEcodes.EV_KEY: [
-                FakeEcodes.BTN_SOUTH,
-                FakeEcodes.BTN_EAST,
+                FakeEcodes.BTN_A,
+                FakeEcodes.BTN_B,
                 FakeEcodes.BTN_TL,
                 FakeEcodes.BTN_TR,
                 FakeEcodes.BTN_SELECT,
@@ -131,12 +131,12 @@ class GamepadTeleopTest(unittest.TestCase):
         self.assertFalse(self.teleop.consume_reset_request())
 
     def test_a_closes_and_b_opens_gripper(self):
-        self.teleop._pressed_buttons.add(FakeEcodes.BTN_SOUTH)
+        self.teleop._pressed_buttons.add(FakeEcodes.BTN_A)
         self.assertTrue(self.teleop.is_button_pressed(0))
         self.assertFalse(self.teleop.is_button_pressed(1))
 
         self.teleop._pressed_buttons.clear()
-        self.teleop._pressed_buttons.add(FakeEcodes.BTN_EAST)
+        self.teleop._pressed_buttons.add(FakeEcodes.BTN_B)
         self.assertFalse(self.teleop.is_button_pressed(0))
         self.assertTrue(self.teleop.is_button_pressed(1))
 
@@ -147,6 +147,13 @@ class GamepadTeleopTest(unittest.TestCase):
 
         self.assertEqual(device.name, "Microsoft X-Box 360 pad")
         self.assertFalse(FakeInputDevice.last_absinfo)
+
+    def test_face_button_name_fallback(self):
+        directional_names = SimpleNamespace(BTN_SOUTH=304, BTN_EAST=305)
+        self.assertEqual(
+            self.teleop._face_button_codes(directional_names),
+            (304, 305),
+        )
 
 
 if __name__ == "__main__":

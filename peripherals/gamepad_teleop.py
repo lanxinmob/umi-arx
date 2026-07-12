@@ -62,7 +62,20 @@ class GamepadTeleop:
                 continue
         return devices
 
+    @staticmethod
+    def _face_button_codes(ecodes):
+        """Return A/B codes across old and new Linux input-header aliases."""
+        button_a = getattr(ecodes, "BTN_A", None)
+        if button_a is None:
+            button_a = getattr(ecodes, "BTN_SOUTH", 304)
+
+        button_b = getattr(ecodes, "BTN_B", None)
+        if button_b is None:
+            button_b = getattr(ecodes, "BTN_EAST", 305)
+        return button_a, button_b
+
     def _find_device(self, evdev):
+        button_a, button_b = self._face_button_codes(evdev.ecodes)
         required_axes = {
             evdev.ecodes.ABS_X,
             evdev.ecodes.ABS_Y,
@@ -72,8 +85,8 @@ class GamepadTeleop:
             evdev.ecodes.ABS_RZ,
         }
         required_buttons = {
-            evdev.ecodes.BTN_A,
-            evdev.ecodes.BTN_B,
+            button_a,
+            button_b,
             evdev.ecodes.BTN_TL,
             evdev.ecodes.BTN_TR,
             evdev.ecodes.BTN_SELECT,
@@ -233,9 +246,10 @@ class GamepadTeleop:
     def is_button_pressed(self, button_id):
         """Match SpaceMouse buttons: A closes and B opens the gripper."""
         evdev = self._load_evdev()
+        button_a, button_b = self._face_button_codes(evdev.ecodes)
         button_codes = {
-            0: evdev.ecodes.BTN_SOUTH,  # Xbox A
-            1: evdev.ecodes.BTN_EAST,  # Xbox B
+            0: button_a,  # Xbox A
+            1: button_b,  # Xbox B
         }
         if button_id not in button_codes:
             raise ValueError(f"Unknown button id: {button_id}")
@@ -278,10 +292,20 @@ def _main():
             while True:
                 state = gamepad.get_motion_state_transformed()
                 reset = gamepad.consume_reset_request()
+                close_gripper = gamepad.is_button_pressed(0)
+                open_gripper = gamepad.is_button_pressed(1)
+                if reset:
+                    command = "HOME"
+                elif close_gripper:
+                    command = "CLOSE"
+                elif open_gripper:
+                    command = "OPEN"
+                else:
+                    command = "-"
                 print(
                     "\r6D: "
                     + np.array2string(state, precision=3, suppress_small=True)
-                    + ("  HOME" if reset else "      "),
+                    + f"  gripper: {command:<5}",
                     end="",
                     flush=True,
                 )
