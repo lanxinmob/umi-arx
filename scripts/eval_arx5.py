@@ -202,6 +202,26 @@ def solve_sphere_collision(ee_poses, robots_config):
     show_default=True,
     help="Maximum gamepad motion output before eval speed scaling.",
 )
+@click.option(
+    "--gamepad-y-scale",
+    type=click.FloatRange(min=0.0, max=1.0),
+    default=1.0,
+    show_default=True,
+    help="Additional multiplier for gamepad Y translation.",
+)
+@click.option(
+    "--gamepad-rz-scale",
+    type=click.FloatRange(min=0.0, max=1.0),
+    default=1.0,
+    show_default=True,
+    help="Additional multiplier for gamepad Rz rotation.",
+)
+@click.option(
+    "--allow-dark-camera",
+    is_flag=True,
+    default=False,
+    help="Continue when frames are fresh but their normalized mean is below 0.1.",
+)
 
 def main(
     input,
@@ -227,10 +247,25 @@ def main(
     gamepad_device,
     gamepad_deadzone,
     gamepad_scale,
+    gamepad_y_scale,
+    gamepad_rz_scale,
+    allow_dark_camera,
 
 ):
     pid = os.getpid()
     os.sched_setaffinity(pid, [7])
+    DEBUG_POSE = True  # 调试开关：打印遥操作和策略执行的位姿信息
+    if DEBUG_POSE:
+        debug_log_path = os.path.join(output, "debug_pose.log")
+        debug_f = open(debug_log_path, "w", buffering=1)  # 行缓冲，实时写入
+        def debug_print(*args, **kwargs):
+            msg = " ".join(str(a) for a in args)
+            print(msg, **kwargs)
+            debug_f.write(msg + "\n")
+        print(f"[DEBUG] 位姿日志写入: {debug_log_path}")
+    else:
+        def debug_print(*args, **kwargs):
+            pass
     max_gripper_width = 0.085
     gripper_speed = 0.04
     cartesian_speed = 0.4
@@ -339,6 +374,8 @@ def main(
                 device_path=gamepad_device,
                 deadzone=gamepad_deadzone,
                 scale=gamepad_scale,
+                y_scale=gamepad_y_scale,
+                rz_scale=gamepad_rz_scale,
             )
         with teleop as sm, KeystrokeCounter() as key_counter, Arx5Env(
             output_dir=output,
@@ -598,10 +635,26 @@ def main(
                     drot = st.Rotation.from_euler("xyz", drot_xyz)
                     for robot_idx in control_robot_idx_list:
                         target_pose[robot_idx, :3] += dpos
+                        # right-multiply: end-effector frame rotation
+                        # drot is applied in the gripper's own coordinate frame
                         target_pose[robot_idx, 3:] = (
-                            drot * st.Rotation.from_rotvec(target_pose[robot_idx, 3:])
+                            st.Rotation.from_rotvec(target_pose[robot_idx, 3:]) * drot
                         ).as_rotvec()
                         # target_pose[robot_idx, 2] = np.maximum(target_pose[robot_idx, 2], 0.055)
+
+                    # --- DEBUG: 遥操作位姿信息 ---
+                    if DEBUG_POSE and iter_idx % frequency == 0:  # 每秒打印一次（frequency=5Hz）
+                        robot_state = env.get_robot_state()
+                        actual_pose = robot_state[0]["ActualTCPPose"]
+                        debug_print(f"\n[TELEOP] t={iter_idx/frequency:.1f}s")
+                        debug_print(f"  sm_state (raw):        {np.array2string(sm_state, precision=3, suppress_small=True)}")
+                        debug_print(f"  dpos={np.array2string(dpos, precision=4)}  drot_xyz={np.array2string(drot_xyz, precision=4)}")
+                        debug_print(f"  target_pose (x,y,z):   {np.array2string(target_pose[0,:3], precision=4)}")
+                        debug_print(f"  target_rot  (rx,ry,rz):{np.array2string(target_pose[0,3:], precision=4)}")
+                        debug_print(f"  actual_pose (x,y,z):   {np.array2string(actual_pose[:3], precision=4)}")
+                        debug_print(f"  actual_rot  (rx,ry,rz):{np.array2string(actual_pose[3:], precision=4)}")
+                        debug_print(f"  gripper_target={gripper_target_pos[0]:.4f}")
+                    # --- END DEBUG ---
 
                     dpos = 0
                     if hasattr(sm, "consume_reset_request"):
@@ -694,12 +747,20 @@ def main(
                     print("Started!")
                     iter_idx = 0
                     perv_target_pose = None
+                    dark_camera_warned = False
                     while True:
                         # calculate timing
                         t_cycle_end = t_start + (iter_idx + steps_per_inference) * dt
 
                         # get obs
                         obs = env.get_obs()
+                        # --- DEBUG: 策略阶段当前位姿 ---
+                        if DEBUG_POSE:
+                            curr_pos = obs[f"robot0_eef_pos"][-1]
+                            curr_rot = obs[f"robot0_eef_rot_axis_angle"][-1]
+                            debug_print(f"\n[POLICY] iter={iter_idx}  curr_pos(x,y,z)={np.array2string(curr_pos, precision=4)}")
+                            debug_print(f"[POLICY]         curr_rot(rx,ry,rz)={np.array2string(curr_rot, precision=4)}")
+                        # --- END DEBUG ---
                         # if no_mirror:
                         #     for i, camera0_rgb in enumerate(obs[f"camera0_rgb"]):
                         #         obs[f"camera0_rgb"][i] = draw_predefined_mask(
@@ -707,8 +768,21 @@ def main(
                         #         )
                         obs_timestamps = obs["timestamp"]
                         print(f"Obs latency {time.time() - obs_timestamps[-1]}")
-                        if np.mean(obs["camera0_rgb"][-1]) < 0.1:
-                            raise RuntimeError("Camera not connected")
+                        camera_mean = float(np.mean(obs["camera0_rgb"][-1]))
+                        if camera_mean < 0.1:
+                            message = (
+                                "Camera frame is fresh but very dark "
+                                f"(normalized mean={camera_mean:.4f}). This does "
+                                "not prove the camera is disconnected. Check the "
+                                "preview/capture input; use --allow-dark-camera "
+                                "only if the dark image is expected."
+                            )
+                            if allow_dark_camera:
+                                if not dark_camera_warned:
+                                    print(f"Warning: {message}")
+                                    dark_camera_warned = True
+                            else:
+                                raise RuntimeError(message)
                         # # HACK: Only use the last image    
                         # obs["camera0_rgb"] = np.array([obs["camera0_rgb"][-1] for _ in obs["camera0_rgb"]])
                         if last_control_is_human:
@@ -789,6 +863,27 @@ def main(
                             env.end_episode()
                             break
                         action = get_real_umi_action(raw_action, obs, action_pose_repr)
+                        # --- DEBUG: 策略输出位姿 ---
+                        if DEBUG_POSE:
+                            # raw_action shape: (steps, 10*num_robots); [pos(3), rot6d(6), grip(1)]
+                            raw_pos = raw_action[0, :3]
+                            raw_rot6d = raw_action[0, 3:9]
+                            raw_rot = st.Rotation.from_matrix(rot6d_to_mat(raw_rot6d)).as_rotvec()
+                            debug_print(f"[POLICY] raw_action[0] pos={np.array2string(raw_pos, precision=4)}")
+                            debug_print(f"[POLICY] raw_action[0] rot={np.array2string(raw_rot, precision=4)}")
+                            debug_print(f"[POLICY] obs_pose_repr={obs_pose_repr}  action_pose_repr={action_pose_repr}")
+                            # decoded action shape: (steps, 7*num_robots); [pos(3), rot(3), grip(1)]
+                            dec_pos = action[0, :3]
+                            dec_rot = action[0, 3:6]
+                            dec_grip = action[0, 6]
+                            debug_print(f"[POLICY] decoded target pos(x,y,z)={np.array2string(dec_pos, precision=4)}")
+                            debug_print(f"[POLICY] decoded target rot(rx,ry,rz)={np.array2string(dec_rot, precision=4)}")
+                            debug_print(f"[POLICY] decoded target grip={dec_grip:.4f}")
+                            # delta from current
+                            curr_pos = obs[f"robot0_eef_pos"][-1]
+                            delta_pos = dec_pos - curr_pos
+                            debug_print(f"[POLICY] delta pos (target-curr)={np.array2string(delta_pos, precision=4)}")
+                        # --- END DEBUG ---
                         action_data = {
                             "action": action,
                             "raw_action": raw_action,

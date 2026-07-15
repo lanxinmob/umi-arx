@@ -115,6 +115,25 @@ class GamepadTeleopTest(unittest.TestCase):
             self.teleop.get_motion_state_transformed(), np.zeros(6)
         )
 
+    def test_y_and_rz_have_independent_speed_scales(self):
+        teleop = GamepadTeleop(
+            deadzone=0.0,
+            scale=1.0,
+            y_scale=0.25,
+            rz_scale=0.4,
+        )
+        teleop._load_evdev = lambda: FakeEvdev
+        teleop._connected = True
+        teleop._axis_info = self.teleop._axis_info
+        teleop._axis_values = dict(self.teleop._axis_values)
+        teleop._axis_values[FakeEcodes.ABS_X] = -32768
+        teleop._pressed_buttons.add(FakeEcodes.BTN_TL)
+
+        state = teleop.get_motion_state_transformed()
+
+        self.assertAlmostEqual(state[1], 0.25, places=4)
+        self.assertAlmostEqual(state[5], 0.4, places=4)
+
         self.teleop._connected = False
         self.teleop._axis_values[FakeEcodes.ABS_X] = 32767
         np.testing.assert_array_equal(

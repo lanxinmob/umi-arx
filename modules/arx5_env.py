@@ -532,6 +532,20 @@ class Arx5Env:
             # recording
             assert self.action_accumulator is not None
 
+            has_actions = len(self.action_accumulator.timestamps) > 0
+            has_observations = bool(self.obs_accumulator.timestamps) and all(
+                len(value) > 0
+                for value in self.obs_accumulator.timestamps.values()
+            )
+            if not has_actions or not has_observations:
+                print(
+                    "Episode discarded because it ended before a complete "
+                    "observation/action sample was recorded."
+                )
+                self.obs_accumulator = None
+                self.action_accumulator = None
+                return
+
             # Since the only way to accumulate obs and action is by calling
             # get_obs and exec_actions, which will be in the same thread.
             # We don't need to worry new data come in here.

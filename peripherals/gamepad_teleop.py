@@ -14,18 +14,32 @@ class GamepadTeleop:
       LB / RB      -> rotation around Z
       Back + Start -> one-shot home reset request
 
-    Gripper buttons are intentionally disabled.
+    A closes the gripper and B opens it.
     """
 
-    def __init__(self, device_path=None, deadzone=0.12, scale=0.5):
+    def __init__(
+        self,
+        device_path=None,
+        deadzone=0.12,
+        scale=0.5,
+        y_scale=1.0,
+        rz_scale=1.0,
+    ):
         if not 0 <= deadzone < 1:
             raise ValueError("deadzone must be in [0, 1)")
         if not 0 < scale <= 1:
             raise ValueError("scale must be in (0, 1]")
+        if not 0 <= y_scale <= 1:
+            raise ValueError("y_scale must be in [0, 1]")
+        if not 0 <= rz_scale <= 1:
+            raise ValueError("rz_scale must be in [0, 1]")
 
         self.device_path = device_path
         self.deadzone = float(deadzone)
         self.scale = float(scale)
+        self.axis_scale = np.array(
+            [1.0, y_scale, 1.0, 1.0, 1.0, rz_scale], dtype=np.float64
+        )
 
         self._device = None
         self._thread = None
@@ -241,7 +255,7 @@ class GamepadTeleop:
             ],
             dtype=np.float64,
         )
-        return state * self.scale
+        return state * self.scale * self.axis_scale
 
     def is_button_pressed(self, button_id):
         """Match SpaceMouse buttons: A closes and B opens the gripper."""
@@ -272,6 +286,8 @@ def _main():
     parser.add_argument("--device", help="input event path, e.g. /dev/input/event12")
     parser.add_argument("--deadzone", type=float, default=0.12)
     parser.add_argument("--scale", type=float, default=0.5)
+    parser.add_argument("--y-scale", type=float, default=1.0)
+    parser.add_argument("--rz-scale", type=float, default=1.0)
     args = parser.parse_args()
 
     if args.list:
@@ -287,6 +303,8 @@ def _main():
             device_path=args.device,
             deadzone=args.deadzone,
             scale=args.scale,
+            y_scale=args.y_scale,
+            rz_scale=args.rz_scale,
         ) as gamepad:
             print("Move the controls; press Ctrl+C to stop.")
             while True:
