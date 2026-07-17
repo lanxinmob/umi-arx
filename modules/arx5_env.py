@@ -121,7 +121,10 @@ class Arx5Env:
             else:
                 res = (1920, 1080)
                 fps = 60
-                buf = 1
+                # A single V4L2 buffer minimizes theoretical latency but makes
+                # inexpensive MJPG capture cards prone to select() timeouts on
+                # startup/restart. Match ffplay/v4l2-ctl's stable queue depth.
+                buf = 4
                 bit_rate = 3000 * 1000
                 # This capture-card class exposes 1080p60 only in MJPG mode.
                 fourcc = "MJPG"
@@ -272,14 +275,19 @@ class Arx5Env:
             self.start_wait()
 
     def stop(self, wait=True):
-        self.end_episode()
-        if self.multi_cam_vis is not None:
-            self.multi_cam_vis.stop(wait=False)
-        for robot in self.robots:
-            robot.stop(wait=False)
-        self.camera.stop(wait=False)
-        if wait:
-            self.stop_wait()
+        try:
+            if self.is_ready:
+                self.end_episode()
+        finally:
+            # Hardware processes must always be stopped, even if episode
+            # finalization fails or a camera process has already exited.
+            if self.multi_cam_vis is not None:
+                self.multi_cam_vis.stop(wait=False)
+            for robot in self.robots:
+                robot.stop(wait=False)
+            self.camera.stop(wait=False)
+            if wait:
+                self.stop_wait()
 
     def start_wait(self):
         self.camera.start_wait()

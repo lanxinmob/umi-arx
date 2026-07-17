@@ -173,8 +173,18 @@ class UvcCamera(mp.Process):
         if wait:
             self.end_wait()
 
-    def start_wait(self):
-        self.ready_event.wait()
+    def start_wait(self, timeout=30.0):
+        if not self.ready_event.wait(timeout=timeout):
+            if not self.is_alive():
+                raise RuntimeError(
+                    f"UvcCamera process for {self.dev_video_path} exited before "
+                    "the first frame was received. Check the child-process "
+                    "traceback above."
+                )
+            raise TimeoutError(
+                f"Timed out after {timeout:g}s waiting for the first frame from "
+                f"{self.dev_video_path}"
+            )
         self.video_recorder.start_wait()
 
     def end_wait(self):
@@ -226,6 +236,8 @@ class UvcCamera(mp.Process):
         # open VideoCapture
         cap = cv2.VideoCapture(self.dev_video_path, cv2.CAP_V4L2)
         try:
+            if not cap.isOpened():
+                raise RuntimeError(f"Failed to open camera {self.dev_video_path}")
             # set resolution and fps
             w, h = self.resolution
             fps = self.capture_fps
@@ -267,14 +279,26 @@ class UvcCamera(mp.Process):
             while not self.stop_event.is_set():
                 ts = time.time()
                 ret = cap.grab()
-                assert ret
+                if not ret:
+                    raise RuntimeError(
+                        f"V4L2 timed out waiting for a frame from "
+                        f"{self.dev_video_path} while using "
+                        f"{actual_w}x{actual_h}@{actual_fps:g} {actual_fourcc}. "
+                        "The device opened and negotiated the mode, but no video "
+                        "buffer arrived. Check the capture input signal, device "
+                        "ownership, USB link, and the mode with v4l2-ctl."
+                    )
 
                 # OpenCV 5 no longer reliably accepts a preallocated ndarray in
                 # VideoCapture.retrieve(). Retrieve normally, then copy into the
                 # recorder's shared buffer only while recording.
                 ret, frame = cap.retrieve()
                 t_recv = time.time()
-                assert ret
+                if not ret or frame is None:
+                    raise RuntimeError(
+                        f"Failed to decode a frame from {self.dev_video_path} "
+                        f"in {actual_fourcc} mode"
+                    )
                 expected_shape = (h, w, 3)
                 if frame.shape != expected_shape:
                     raise RuntimeError(

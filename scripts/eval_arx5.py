@@ -871,7 +871,7 @@ def main(
                             raw_rot = st.Rotation.from_matrix(rot6d_to_mat(raw_rot6d)).as_rotvec()
                             debug_print(f"[POLICY] raw_action[0] pos={np.array2string(raw_pos, precision=4)}")
                             debug_print(f"[POLICY] raw_action[0] rot={np.array2string(raw_rot, precision=4)}")
-                            debug_print(f"[POLICY] obs_pose_repr={obs_pose_repr}  action_pose_repr={action_pose_repr}")
+                            debug_print(f"[POLICY] obs_pose_repr={obs_pose_rep}  action_pose_repr={action_pose_repr}")
                             # decoded action shape: (steps, 7*num_robots); [pos(3), rot(3), grip(1)]
                             dec_pos = action[0, :3]
                             dec_rot = action[0, 3:6]
