@@ -173,7 +173,7 @@ class UvcCamera(mp.Process):
         if wait:
             self.end_wait()
 
-    def start_wait(self, timeout=30.0):
+    def start_wait(self, timeout=75.0):
         if not self.ready_event.wait(timeout=timeout):
             if not self.is_alive():
                 raise RuntimeError(
@@ -275,18 +275,35 @@ class UvcCamera(mp.Process):
                 put_start_time = time.time()
 
             iter_idx = 0
+            consecutive_frame_failures = 0
+            # Some inexpensive MJPEG capture cards emit a burst of empty or
+            # truncated buffers while the HDMI link is synchronizing.  ffplay
+            # drops these and keeps reading, so do the same instead of killing
+            # the camera worker after only a handful of bad buffers.
+            max_consecutive_frame_failures = 60
             t_start = time.time()
             while not self.stop_event.is_set():
                 ts = time.time()
                 ret = cap.grab()
                 if not ret:
+                    consecutive_frame_failures += 1
+                    if consecutive_frame_failures <= max_consecutive_frame_failures:
+                        print(
+                            f"Warning: failed to grab a V4L2 frame from "
+                            f"{self.dev_video_path}; retrying "
+                            f"({consecutive_frame_failures}/"
+                            f"{max_consecutive_frame_failures})"
+                        )
+                        time.sleep(0.2)
+                        continue
                     raise RuntimeError(
-                        f"V4L2 timed out waiting for a frame from "
-                        f"{self.dev_video_path} while using "
+                        f"V4L2 failed {consecutive_frame_failures} consecutive "
+                        f"times while waiting for frames from "
+                        f"{self.dev_video_path} using "
                         f"{actual_w}x{actual_h}@{actual_fps:g} {actual_fourcc}. "
-                        "The device opened and negotiated the mode, but no video "
-                        "buffer arrived. Check the capture input signal, device "
-                        "ownership, USB link, and the mode with v4l2-ctl."
+                        "The capture device is delivering no usable buffers. "
+                        "Check for zero-byte/corrupted MJPEG frames with ffplay "
+                        "or v4l2-ctl, then inspect the HDMI source and USB link."
                     )
 
                 # OpenCV 5 no longer reliably accepts a preallocated ndarray in
@@ -295,10 +312,21 @@ class UvcCamera(mp.Process):
                 ret, frame = cap.retrieve()
                 t_recv = time.time()
                 if not ret or frame is None:
+                    consecutive_frame_failures += 1
+                    if consecutive_frame_failures <= max_consecutive_frame_failures:
+                        print(
+                            f"Warning: received an undecodable "
+                            f"{actual_fourcc} frame from {self.dev_video_path}; "
+                            f"retrying ({consecutive_frame_failures}/"
+                            f"{max_consecutive_frame_failures})"
+                        )
+                        continue
                     raise RuntimeError(
-                        f"Failed to decode a frame from {self.dev_video_path} "
-                        f"in {actual_fourcc} mode"
+                        f"Failed to decode {consecutive_frame_failures} "
+                        f"consecutive frames from {self.dev_video_path} in "
+                        f"{actual_fourcc} mode"
                     )
+                consecutive_frame_failures = 0
                 expected_shape = (h, w, 3)
                 if frame.shape != expected_shape:
                     raise RuntimeError(
