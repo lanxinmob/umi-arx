@@ -153,14 +153,15 @@ class Arx5Env:
                         img = np.ascontiguousarray(f(img))
                         if is_mirror is not None:
                             img[is_mirror] = img[:, ::-1, :][is_mirror]
-                        img = draw_predefined_mask(
-                            img,
-                            color=(0, 0, 0),
-                            mirror=no_mirror,
-                            gripper=True,
-                            finger=False,
-                            use_aa=True,
-                        )
+                        if no_mirror:
+                            img = draw_predefined_mask(
+                                img,
+                                color=(0, 0, 0),
+                                mirror=True,
+                                gripper=False,
+                                finger=False,
+                                use_aa=True,
+                            )
                     else:
                         img = fisheye_converter.forward(img)
                         img = img[..., ::-1]

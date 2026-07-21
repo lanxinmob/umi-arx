@@ -50,7 +50,6 @@ from utils.real_inference_util import (
     get_real_umi_obs_dict,
     get_real_umi_action,
 )
-from utils.cv_util import draw_predefined_mask
 from peripherals.spacemouse_shared_memory import Spacemouse
 from peripherals.gamepad_teleop import GamepadTeleop
 from utils.pose_util import pose_to_mat, mat_to_pose, rot6d_to_mat
@@ -172,7 +171,7 @@ def solve_sphere_collision(ee_poses, robots_config):
     type=float,
     help="Latency between receiving SapceMouse command to executing on Robot in Sec.",
 )
-@click.option("-nm", "--no_mirror", is_flag=True, default=False)
+@click.option("-nm", "--no-mirror", "--no_mirror", "no_mirror", is_flag=True, default=False)
 @click.option("-sf", "--sim_fov", type=float, default=None)
 @click.option("-ci", "--camera_intrinsics", type=str, default=None)
 @click.option("--mirror_swap", is_flag=True, default=False)
@@ -183,46 +182,6 @@ def solve_sphere_collision(ee_poses, robots_config):
     default="keyboard",
     show_default=True,
 )
-@click.option(
-    "--gamepad-device",
-    type=click.Path(exists=True, dir_okay=False),
-    default=None,
-    help="Linux input event path, e.g. /dev/input/event12. Auto-detect by default.",
-)
-@click.option(
-    "--gamepad-deadzone",
-    type=click.FloatRange(min=0.0, max=0.99),
-    default=0.12,
-    show_default=True,
-)
-@click.option(
-    "--gamepad-scale",
-    type=click.FloatRange(min=0.01, max=1.0),
-    default=0.5,
-    show_default=True,
-    help="Maximum gamepad motion output before eval speed scaling.",
-)
-@click.option(
-    "--gamepad-y-scale",
-    type=click.FloatRange(min=0.0, max=1.0),
-    default=1.0,
-    show_default=True,
-    help="Additional multiplier for gamepad Y translation.",
-)
-@click.option(
-    "--gamepad-rz-scale",
-    type=click.FloatRange(min=0.0, max=1.0),
-    default=1.0,
-    show_default=True,
-    help="Additional multiplier for gamepad Rz rotation.",
-)
-@click.option(
-    "--allow-dark-camera",
-    is_flag=True,
-    default=False,
-    help="Continue when frames are fresh but their normalized mean is below 0.1.",
-)
-
 def main(
     input,
     output,
@@ -244,12 +203,6 @@ def main(
     mirror_swap,
     task_name,
     teleop_device,
-    gamepad_device,
-    gamepad_deadzone,
-    gamepad_scale,
-    gamepad_y_scale,
-    gamepad_rz_scale,
-    allow_dark_camera,
 
 ):
     pid = os.getpid()
@@ -291,13 +244,6 @@ def main(
         match_episode_max -= 1
         print(f"match_episode: {match_episode}, match_episode_min: {match_episode_min}, match_episode_max: {match_episode_max}")
 
-
-    ###################################################################################################################################################################################################
-    if task_name == 'cup':
-        no_mirror = True
-    else:
-        no_mirror = False
-    ###################################################################################################################################################################################################
 
     tx_left_right = np.array(
         [
@@ -370,13 +316,7 @@ def main(
                 deadzone=0.1,
             )
         else:
-            teleop = GamepadTeleop(
-                device_path=gamepad_device,
-                deadzone=gamepad_deadzone,
-                scale=gamepad_scale,
-                y_scale=gamepad_y_scale,
-                rz_scale=gamepad_rz_scale,
-            )
+            teleop = GamepadTeleop()
         with teleop as sm, KeystrokeCounter() as key_counter, Arx5Env(
             output_dir=output,
             robots_config=robots_config,
@@ -408,6 +348,10 @@ def main(
             while not env.is_ready:
                 time.sleep(0.1)
             print("Env is ready")
+
+            preview_window = "default"
+            cv2.namedWindow(preview_window, cv2.WINDOW_NORMAL)
+            cv2.resizeWindow(preview_window, 960, 720)
 
             print(f"Warming up video recording")
             video_dir = env.video_dir.joinpath("test")
@@ -557,7 +501,7 @@ def main(
                         thickness=1,
                         color=(255, 255, 255),
                     )
-                    cv2.imshow("default", vis_img[..., ::-1])
+                    cv2.imshow(preview_window, vis_img[..., ::-1])
                     _ = cv2.pollKey()
                     press_events = key_counter.get_press_events()
                     start_policy = False
@@ -747,7 +691,6 @@ def main(
                     print("Started!")
                     iter_idx = 0
                     perv_target_pose = None
-                    dark_camera_warned = False
                     while True:
                         # calculate timing
                         t_cycle_end = t_start + (iter_idx + steps_per_inference) * dt
@@ -761,28 +704,16 @@ def main(
                             debug_print(f"\n[POLICY] iter={iter_idx}  curr_pos(x,y,z)={np.array2string(curr_pos, precision=4)}")
                             debug_print(f"[POLICY]         curr_rot(rx,ry,rz)={np.array2string(curr_rot, precision=4)}")
                         # --- END DEBUG ---
-                        # if no_mirror:
-                        #     for i, camera0_rgb in enumerate(obs[f"camera0_rgb"]):
-                        #         obs[f"camera0_rgb"][i] = draw_predefined_mask(
-                        #             camera0_rgb, (0,0,0), mirror=no_mirror, gripper=False, finger=False, use_aa=True
-                        #         )
                         obs_timestamps = obs["timestamp"]
                         print(f"Obs latency {time.time() - obs_timestamps[-1]}")
                         camera_mean = float(np.mean(obs["camera0_rgb"][-1]))
                         if camera_mean < 0.1:
-                            message = (
+                            raise RuntimeError(
                                 "Camera frame is fresh but very dark "
                                 f"(normalized mean={camera_mean:.4f}). This does "
-                                "not prove the camera is disconnected. Check the "
-                                "preview/capture input; use --allow-dark-camera "
-                                "only if the dark image is expected."
+                                "not prove the camera is disconnected; check the "
+                                "preview and capture input."
                             )
-                            if allow_dark_camera:
-                                if not dark_camera_warned:
-                                    print(f"Warning: {message}")
-                                    dark_camera_warned = True
-                            else:
-                                raise RuntimeError(message)
                         # # HACK: Only use the last image    
                         # obs["camera0_rgb"] = np.array([obs["camera0_rgb"][-1] for _ in obs["camera0_rgb"]])
                         if last_control_is_human:
@@ -970,7 +901,7 @@ def main(
                             thickness=1,
                             color=(255, 255, 255),
                         )
-                        cv2.imshow("default", vis_img[..., ::-1])
+                        cv2.imshow(preview_window, vis_img[..., ::-1])
 
                         _ = cv2.pollKey()
                         press_events = key_counter.get_press_events()
