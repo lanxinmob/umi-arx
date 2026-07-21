@@ -207,6 +207,10 @@ def main(
 ):
     pid = os.getpid()
     os.sched_setaffinity(pid, [7])
+    os.makedirs(output, exist_ok=True)
+    os.makedirs(os.path.join(output, "obs"), exist_ok=True)
+    os.makedirs(os.path.join(output, "action"), exist_ok=True)
+
     DEBUG_POSE = True  # 调试开关：打印遥操作和策略执行的位姿信息
     if DEBUG_POSE:
         debug_log_path = os.path.join(output, "debug_pose.log")
@@ -223,9 +227,6 @@ def main(
     gripper_speed = 0.04
     cartesian_speed = 0.4
     orientation_speed = 0.8
-    os.makedirs(output, exist_ok=True)
-    os.makedirs(os.path.join(output, "obs"), exist_ok=True)
-    os.makedirs(os.path.join(output, "action"), exist_ok=True)
 
     if match_dataset_path is not None:
         assert match_episode is not None
