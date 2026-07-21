@@ -31,6 +31,7 @@ class Arx5Env:
         obs_float32=False,
         camera_reorder=None,
         no_mirror=False,
+        gripper_mask=False,
         fisheye_converter=None,
         mirror_swap=False,
         # this latency compensates receive_timestamp
@@ -153,12 +154,12 @@ class Arx5Env:
                         img = np.ascontiguousarray(f(img))
                         if is_mirror is not None:
                             img[is_mirror] = img[:, ::-1, :][is_mirror]
-                        if no_mirror:
+                        if no_mirror or gripper_mask:
                             img = draw_predefined_mask(
                                 img,
                                 color=(0, 0, 0),
-                                mirror=True,
-                                gripper=False,
+                                mirror=no_mirror,
+                                gripper=gripper_mask,
                                 finger=False,
                                 use_aa=True,
                             )

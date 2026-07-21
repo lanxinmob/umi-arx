@@ -172,6 +172,12 @@ def solve_sphere_collision(ee_poses, robots_config):
     help="Latency between receiving SapceMouse command to executing on Robot in Sec.",
 )
 @click.option("-nm", "--no-mirror", "--no_mirror", "no_mirror", is_flag=True, default=False)
+@click.option(
+    "--gripper-mask/--no-gripper-mask",
+    default=False,
+    show_default=True,
+    help="Show or hide the black gripper mask at the bottom of camera observations.",
+)
 @click.option("-sf", "--sim_fov", type=float, default=None)
 @click.option("-ci", "--camera_intrinsics", type=str, default=None)
 @click.option("--mirror_swap", is_flag=True, default=False)
@@ -198,6 +204,7 @@ def main(
     frequency,
     command_latency,
     no_mirror,
+    gripper_mask,
     sim_fov,
     camera_intrinsics,
     mirror_swap,
@@ -334,6 +341,7 @@ def main(
             camera_obs_horizon=cfg.task.shape_meta.obs.camera0_rgb.horizon,
             robot_obs_horizon=cfg.task.shape_meta.obs.robot0_eef_pos.horizon,
             no_mirror=no_mirror,
+            gripper_mask=gripper_mask,
             # fisheye_converter=fisheye_converter,
             mirror_swap=mirror_swap,
             # action
