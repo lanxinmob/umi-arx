@@ -53,6 +53,7 @@ from utils.real_inference_util import (
 from peripherals.spacemouse_shared_memory import Spacemouse
 from peripherals.gamepad_teleop import GamepadTeleop
 from utils.pose_util import pose_to_mat, mat_to_pose, rot6d_to_mat
+from utils.pose_episode_logger import PoseEpisodeLogger
 import scipy.spatial.transform as st
 
 from peripherals.keyboard_teleop import KeyboardTeleop
@@ -218,18 +219,6 @@ def main(
     os.makedirs(os.path.join(output, "obs"), exist_ok=True)
     os.makedirs(os.path.join(output, "action"), exist_ok=True)
 
-    DEBUG_POSE = True  # 调试开关：打印遥操作和策略执行的位姿信息
-    if DEBUG_POSE:
-        debug_log_path = os.path.join(output, "debug_pose.log")
-        debug_f = open(debug_log_path, "w", buffering=1)  # 行缓冲，实时写入
-        def debug_print(*args, **kwargs):
-            msg = " ".join(str(a) for a in args)
-            print(msg, **kwargs)
-            debug_f.write(msg + "\n")
-        print(f"[DEBUG] 位姿日志写入: {debug_log_path}")
-    else:
-        def debug_print(*args, **kwargs):
-            pass
     max_gripper_width = 0.085
     gripper_speed = 0.04
     cartesian_speed = 0.4
@@ -595,20 +584,6 @@ def main(
                         ).as_rotvec()
                         # target_pose[robot_idx, 2] = np.maximum(target_pose[robot_idx, 2], 0.055)
 
-                    # --- DEBUG: 遥操作位姿信息 ---
-                    if DEBUG_POSE and iter_idx % frequency == 0:  # 每秒打印一次（frequency=5Hz）
-                        robot_state = env.get_robot_state()
-                        actual_pose = robot_state[0]["ActualTCPPose"]
-                        debug_print(f"\n[TELEOP] t={iter_idx/frequency:.1f}s")
-                        debug_print(f"  sm_state (raw):        {np.array2string(sm_state, precision=3, suppress_small=True)}")
-                        debug_print(f"  dpos={np.array2string(dpos, precision=4)}  drot_xyz={np.array2string(drot_xyz, precision=4)}")
-                        debug_print(f"  target_pose (x,y,z):   {np.array2string(target_pose[0,:3], precision=4)}")
-                        debug_print(f"  target_rot  (rx,ry,rz):{np.array2string(target_pose[0,3:], precision=4)}")
-                        debug_print(f"  actual_pose (x,y,z):   {np.array2string(actual_pose[:3], precision=4)}")
-                        debug_print(f"  actual_rot  (rx,ry,rz):{np.array2string(actual_pose[3:], precision=4)}")
-                        debug_print(f"  gripper_target={gripper_target_pos[0]:.4f}")
-                    # --- END DEBUG ---
-
                     dpos = 0
                     if hasattr(sm, "consume_reset_request"):
                         reset_requested = sm.consume_reset_request()
@@ -670,12 +645,31 @@ def main(
                     iter_idx += 1
 
                 # ========== policy control loop ==============
+                pose_logger = None
+                episode_status = "error"
+                episode_error = None
                 try:
                     # start episode
+                    episode_id = env.replay_buffer.n_episodes
                     start_delay = 1.0
                     eval_t_start = time.time() + start_delay
                     t_start = time.monotonic() + start_delay
                     env.start_episode(eval_t_start)
+                    pose_logger = PoseEpisodeLogger(
+                        os.path.join(output, "debug_pose"),
+                        episode_id=episode_id,
+                        metadata={
+                            "checkpoint": ckpt_path,
+                            "task_name": task_name,
+                            "teleop_device": teleop_device,
+                            "obs_pose_repr": obs_pose_rep,
+                            "action_pose_repr": action_pose_repr,
+                            "robot_index": 0,
+                            "frequency_hz": frequency,
+                            "steps_per_inference": steps_per_inference,
+                        },
+                    )
+                    episode_status = "running"
 
                     # get current pose
                     obs = env.get_obs()
@@ -706,13 +700,6 @@ def main(
 
                         # get obs
                         obs = env.get_obs()
-                        # --- DEBUG: 策略阶段当前位姿 ---
-                        if DEBUG_POSE:
-                            curr_pos = obs[f"robot0_eef_pos"][-1]
-                            curr_rot = obs[f"robot0_eef_rot_axis_angle"][-1]
-                            debug_print(f"\n[POLICY] iter={iter_idx}  curr_pos(x,y,z)={np.array2string(curr_pos, precision=4)}")
-                            debug_print(f"[POLICY]         curr_rot(rx,ry,rz)={np.array2string(curr_rot, precision=4)}")
-                        # --- END DEBUG ---
                         obs_timestamps = obs["timestamp"]
                         print(f"Obs latency {time.time() - obs_timestamps[-1]}")
                         camera_mean = float(np.mean(obs["camera0_rgb"][-1]))
@@ -784,46 +771,66 @@ def main(
                         socket.send_pyobj(obs_dict_np)
                         raw_action = socket.recv_pyobj()
 
-                        # print(raw_action[:, :3])
-
-                        for k, raw_action_cmd in enumerate(raw_action):
-                            translation = raw_action_cmd[:3]
-                            rotation = st.Rotation.from_matrix(rot6d_to_mat(raw_action_cmd[3:9])).as_rotvec()
-                            if np.max(np.abs(translation)) / (k+1) > 0.1:
-                                print(f"==============={np.mean(obs['camera0_rgb'][-1])}================")
-                                print(f"  {translation}, {rotation}")
-
-                                raise RuntimeError("Action translation too large. Please check the input")
-
-                        
                         if type(raw_action) == str:
                             print(
                                 f"Inference from PolicyInferenceNode failed: {raw_action}. Please check the model."
                             )
+                            episode_status = "inference_failed"
+                            episode_error = raw_action
                             env.end_episode()
                             break
+
+                        # print(raw_action[:, :3])
+                        for k, raw_action_cmd in enumerate(raw_action):
+                            translation = raw_action_cmd[:3]
+                            rotation = st.Rotation.from_matrix(
+                                rot6d_to_mat(raw_action_cmd[3:9])
+                            ).as_rotvec()
+                            if np.max(np.abs(translation)) / (k + 1) > 0.1:
+                                print(
+                                    f"==============={np.mean(obs['camera0_rgb'][-1])}================"
+                                )
+                                print(f"  {translation}, {rotation}")
+                                raise RuntimeError(
+                                    "Action translation too large. Please check the input"
+                                )
+
                         action = get_real_umi_action(raw_action, obs, action_pose_repr)
-                        # --- DEBUG: 策略输出位姿 ---
-                        if DEBUG_POSE:
-                            # raw_action shape: (steps, 10*num_robots); [pos(3), rot6d(6), grip(1)]
-                            raw_pos = raw_action[0, :3]
-                            raw_rot6d = raw_action[0, 3:9]
-                            raw_rot = st.Rotation.from_matrix(rot6d_to_mat(raw_rot6d)).as_rotvec()
-                            debug_print(f"[POLICY] raw_action[0] pos={np.array2string(raw_pos, precision=4)}")
-                            debug_print(f"[POLICY] raw_action[0] rot={np.array2string(raw_rot, precision=4)}")
-                            debug_print(f"[POLICY] obs_pose_repr={obs_pose_rep}  action_pose_repr={action_pose_repr}")
-                            # decoded action shape: (steps, 7*num_robots); [pos(3), rot(3), grip(1)]
-                            dec_pos = action[0, :3]
-                            dec_rot = action[0, 3:6]
-                            dec_grip = action[0, 6]
-                            debug_print(f"[POLICY] decoded target pos(x,y,z)={np.array2string(dec_pos, precision=4)}")
-                            debug_print(f"[POLICY] decoded target rot(rx,ry,rz)={np.array2string(dec_rot, precision=4)}")
-                            debug_print(f"[POLICY] decoded target grip={dec_grip:.4f}")
-                            # delta from current
-                            curr_pos = obs[f"robot0_eef_pos"][-1]
-                            delta_pos = dec_pos - curr_pos
-                            debug_print(f"[POLICY] delta pos (target-curr)={np.array2string(delta_pos, precision=4)}")
-                        # --- END DEBUG ---
+                        inference_latency_s = time.time() - s
+                        raw_pos = raw_action[0, :3]
+                        raw_rot = st.Rotation.from_matrix(
+                            rot6d_to_mat(raw_action[0, 3:9])
+                        ).as_rotvec()
+                        curr_pos = obs["robot0_eef_pos"][-1]
+                        curr_rot = obs["robot0_eef_rot_axis_angle"][-1]
+                        dec_pos = action[0, :3]
+                        dec_rot = action[0, 3:6]
+                        dec_grip = action[0, 6]
+                        position_command_delta_m = float(
+                            np.linalg.norm(dec_pos - curr_pos)
+                        )
+                        rotation_command_delta_deg = float(
+                            np.degrees(
+                                (
+                                    st.Rotation.from_rotvec(curr_rot).inv()
+                                    * st.Rotation.from_rotvec(dec_rot)
+                                ).magnitude()
+                            )
+                        )
+                        pose_logger.log_policy_sample(
+                            iter_idx=iter_idx,
+                            elapsed_s=max(0.0, time.time() - eval_t_start),
+                            current_pos=curr_pos,
+                            current_rot=curr_rot,
+                            raw_pos=raw_pos,
+                            raw_rot=raw_rot,
+                            target_pos=dec_pos,
+                            target_rot=dec_rot,
+                            target_gripper_m=dec_grip,
+                            position_command_delta_m=position_command_delta_m,
+                            rotation_command_delta_deg=rotation_command_delta_deg,
+                            inference_latency_ms=inference_latency_s * 1000.0,
+                        )
                         action_data = {
                             "action": action,
                             "raw_action": raw_action,
@@ -836,7 +843,7 @@ def main(
                             action_data,
                             allow_pickle=True,
                         )
-                        print("Inference latency:", time.time() - s)
+                        print("Inference latency:", inference_latency_s)
 
                         # convert policy action to env actions
                         this_target_poses = action
@@ -927,6 +934,9 @@ def main(
                             print("Max Duration reached.")
                             stop_episode = True
                         if stop_episode:
+                            episode_status = (
+                                "max_duration" if t_since_start > max_duration else "manual_stop"
+                            )
                             env.end_episode()
                             break
 
@@ -936,8 +946,18 @@ def main(
 
                 except KeyboardInterrupt:
                     print("Interrupted!")
+                    episode_status = "interrupted"
                     # stop robot.
                     env.end_episode()
+                except Exception as exc:
+                    episode_status = f"error:{type(exc).__name__}"
+                    episode_error = str(exc)
+                    raise
+                finally:
+                    if pose_logger is not None:
+                        pose_logger.finish(episode_status, error=episode_error)
+                        print(f"Pose report saved to {pose_logger.episode_dir}")
+                        print(f"Episode comparison: {pose_logger.root_dir / 'index.html'}")
 
                 print("Stopped.")
 
