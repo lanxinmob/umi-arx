@@ -64,6 +64,28 @@ import zmq
 OmegaConf.register_new_resolver("eval", eval, replace=True)
 
 
+PREVIEW_MAX_SIZE = (960, 720)
+
+
+def fit_preview_image(image, max_size=PREVIEW_MAX_SIZE):
+    """Scale a preview to fit the screen area without changing its aspect ratio."""
+    height, width = image.shape[:2]
+    if height <= 0 or width <= 0:
+        raise ValueError(f"Invalid preview image shape: {image.shape}")
+
+    max_width, max_height = max_size
+    scale = min(max_width / width, max_height / height)
+    output_size = (
+        max(1, round(width * scale)),
+        max(1, round(height * scale)),
+    )
+    if output_size == (width, height):
+        return image
+
+    interpolation = cv2.INTER_AREA if scale < 1 else cv2.INTER_LINEAR
+    return cv2.resize(image, output_size, interpolation=interpolation)
+
+
 def solve_table_collision(ee_pose, gripper_width, height_threshold):
     finger_thickness = 25.5 / 1000
     keypoints = list()
@@ -325,7 +347,7 @@ def main(
             init_joints=init_joints,
             enable_multi_cam_vis=False,
             # latency
-            camera_obs_latency=0.17,
+            camera_obs_latency=0.091,  # previously 0.17
             # obs
             camera_obs_horizon=cfg.task.shape_meta.obs.camera0_rgb.horizon,
             robot_obs_horizon=cfg.task.shape_meta.obs.robot0_eef_pos.horizon,
@@ -348,8 +370,10 @@ def main(
             print("Env is ready")
 
             preview_window = "default"
-            cv2.namedWindow(preview_window, cv2.WINDOW_NORMAL)
-            cv2.resizeWindow(preview_window, 960, 720)
+            # Let the window follow the fitted frame exactly. WINDOW_NORMAL with a
+            # fixed 960x720 window leaves a large blank area for square or wide
+            # camera previews.
+            cv2.namedWindow(preview_window, cv2.WINDOW_AUTOSIZE)
 
             print(f"Warming up video recording")
             video_dir = env.video_dir.joinpath("test")
@@ -499,7 +523,8 @@ def main(
                         thickness=1,
                         color=(255, 255, 255),
                     )
-                    cv2.imshow(preview_window, vis_img[..., ::-1])
+                    preview_img = fit_preview_image(vis_img[..., ::-1])
+                    cv2.imshow(preview_window, preview_img)
                     _ = cv2.pollKey()
                     press_events = key_counter.get_press_events()
                     start_policy = False
@@ -917,7 +942,8 @@ def main(
                             thickness=1,
                             color=(255, 255, 255),
                         )
-                        cv2.imshow(preview_window, vis_img[..., ::-1])
+                        preview_img = fit_preview_image(vis_img[..., ::-1])
+                        cv2.imshow(preview_window, preview_img)
 
                         _ = cv2.pollKey()
                         press_events = key_counter.get_press_events()
