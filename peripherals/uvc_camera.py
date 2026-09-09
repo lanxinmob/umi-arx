@@ -195,6 +195,34 @@ class UvcCamera(mp.Process):
     def is_ready(self):
         return self.ready_event.is_set()
 
+    @property
+    def frame_count(self):
+        return self.ring_buffer.count
+
+    def wait_for_frames(self, count, timeout=10.0):
+        if count > self.ring_buffer.get_max_k:
+            raise ValueError(
+                f"Camera {self.dev_video_path} needs {count} history frames, "
+                f"but its ring buffer supports at most "
+                f"{self.ring_buffer.get_max_k}"
+            )
+
+        deadline = time.monotonic() + timeout
+        while self.frame_count < count:
+            if self.exitcode is not None:
+                raise RuntimeError(
+                    f"Camera process for {self.dev_video_path} exited after "
+                    f"producing {self.frame_count} of {count} required frames"
+                )
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError(
+                    f"Timed out after {timeout:g}s waiting for "
+                    f"{self.dev_video_path} to produce {count} frames; "
+                    f"received {self.frame_count}"
+                )
+            time.sleep(min(0.01, remaining))
+
     def get(self, k=None, out=None):
         if k is None:
             return self.ring_buffer.get(out=out)

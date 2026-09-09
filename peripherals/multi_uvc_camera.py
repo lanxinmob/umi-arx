@@ -1,4 +1,4 @@
-from typing import List, Optional, Union, Dict, Callable
+from typing import List, Optional, Union, Dict, Callable, Sequence
 import copy
 import time
 import pathlib
@@ -114,7 +114,27 @@ class MultiUvcCamera:
         for camera in self.cameras.values():
             camera.join()
 
-    def get(self, k=None, out=None) -> Dict[int, Dict[str, np.ndarray]]:
+    def _normalize_frame_counts(self, k):
+        if k is None or isinstance(k, (int, np.integer)):
+            return [k] * self.n_cameras
+        counts = list(k)
+        if len(counts) != self.n_cameras:
+            raise ValueError(
+                f"Expected {self.n_cameras} camera frame counts, got "
+                f"{len(counts)}"
+            )
+        return counts
+
+    def wait_for_frames(self, k: Union[int, Sequence[int]], timeout=10.0):
+        counts = self._normalize_frame_counts(k)
+        deadline = time.monotonic() + timeout
+        for camera, count in zip(self.cameras.values(), counts):
+            remaining = max(0.0, deadline - time.monotonic())
+            camera.wait_for_frames(count, timeout=remaining)
+
+    def get(
+        self, k: Optional[Union[int, Sequence[int]]] = None, out=None
+    ) -> Dict[int, Dict[str, np.ndarray]]:
         """
         Return order T,H,W,C
         {
@@ -127,11 +147,12 @@ class MultiUvcCamera:
         """
         if out is None:
             out = dict()
-        for i, camera in enumerate(self.cameras.values()):
+        counts = self._normalize_frame_counts(k)
+        for i, (camera, count) in enumerate(zip(self.cameras.values(), counts)):
             this_out = None
             if i in out:
                 this_out = out[i]
-            this_out = camera.get(k=k, out=this_out)
+            this_out = camera.get(k=count, out=this_out)
             out[i] = this_out
         return out
 

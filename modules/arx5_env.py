@@ -325,17 +325,27 @@ class Arx5Env:
         "observation dict"
         assert self.is_ready
         # get data
-        # 60 Hz, camera_calibrated_timestamp
-        k = (
+        # Keep enough frames to cover the observation horizon at each camera's FPS.
+        camera_ks = [
             math.ceil(
                 self.camera_obs_horizon
                 * self.camera_down_sample_steps
-                * (60 / self.frequency)
+                * (camera.capture_fps / self.frequency)
             )
             + 2
-        )  # here 2 is adjustable, typically 1 should be enough
-        # print('==>k  ', k, self.camera_obs_horizon, self.camera_down_sample_steps, self.frequency)
-        self.last_camera_data = self.camera.get(k=k, out=self.last_camera_data)
+            for camera in self.camera.cameras.values()
+        ]
+        history_seconds = max(
+            k / camera.capture_fps
+            for k, camera in zip(camera_ks, self.camera.cameras.values())
+        )
+        self.camera.wait_for_frames(
+            camera_ks,
+            timeout=max(10.0, history_seconds * 2),
+        )
+        self.last_camera_data = self.camera.get(
+            k=camera_ks, out=self.last_camera_data
+        )
 
         # both have more than n_obs_steps data
         last_robots_data = list()

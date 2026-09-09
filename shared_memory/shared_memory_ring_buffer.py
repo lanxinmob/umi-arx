@@ -196,12 +196,19 @@ class SharedMemoryRingBuffer:
         return out
 
     def get_last_k(self, k: int, out=None) -> Dict[str, np.ndarray]:
-        assert k <= self.get_max_k
+        if k > self.get_max_k:
+            raise ValueError(
+                f"Requested {k} items, but this ring buffer supports at most "
+                f"{self.get_max_k}"
+            )
         if out is None:
             out = self._allocate_empty(k)
         start_time = time.monotonic()
         count = self.counter.load()
-        assert k <= count
+        if k > count:
+            raise RuntimeError(
+                f"Requested {k} items, but only {count} have been written"
+            )
         curr_idx = (count - 1) % self.buffer_size
         for key, value in self.shared_arrays.items():
             arr = value.get()
