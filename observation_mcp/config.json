@@ -1,0 +1,22 @@
+{
+  "camera": {
+    "device": "/dev/v4l/by-id/usb-MACROSILICON_Vin_1_20250811-video-index0",
+    "width": 1920,
+    "height": 1080,
+    "fps": 60,
+    "fourcc": "MJPG",
+    "buffer_size": 4,
+    "output_width": 224,
+    "output_height": 224,
+    "jpeg_quality": 80
+  },
+  "robot": {
+    "endpoint": "tcp://127.0.0.1:8765",
+    "timeout_ms": 300
+  },
+  "sampling": {
+    "frequency_hz": 5,
+    "buffer_seconds": 10,
+    "max_observation_age_seconds": 1
+  }
+}

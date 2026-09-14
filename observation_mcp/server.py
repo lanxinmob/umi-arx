@@ -7,6 +7,7 @@ import argparse
 import base64
 from dataclasses import dataclass
 import json
+import os
 import sys
 import time
 from typing import Any, Protocol
@@ -516,14 +517,22 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="serve deterministic observations without camera or robot hardware",
     )
+    parser.add_argument(
+        "--config",
+        default=os.path.join(os.path.dirname(__file__), "config.json"),
+        help="live camera, robot, and sampling JSON configuration",
+    )
     return parser.parse_args()
 
 
 def main() -> None:
     args = _parse_args()
-    if not args.mock:
-        raise SystemExit("live mode is added in the next implementation step; use --mock")
-    provider: ObservationProvider = MockObservationProvider()
+    if args.mock:
+        provider: ObservationProvider = MockObservationProvider()
+    else:
+        from live import LiveObservationProvider
+
+        provider = LiveObservationProvider(args.config)
     try:
         ObservationMcpServer(provider).serve_stdio()
     finally:
