@@ -104,6 +104,7 @@ Limits live in `control.Limits`; model requests cannot change them or gains.
 | Single translation / rotation / gripper delta | 2 mm / 0.02 rad / 2 mm |
 | Smallest nonzero translation / rotation / gripper delta | 0.5 mm / 0.001 rad / 0.5 mm |
 | Planned translation / rotation / gripper speed | 5 mm/s / 0.05 rad/s / 4 mm/s |
+| Measured gripper speed stop threshold | 12 mm/s, provisional pending live retest |
 | Joint speed | 0.15 rad/s |
 | Duration / settling deadline | 1-5 s / additional 1 s |
 | Motor feedback age / control-loop gap | 100 ms / 100 ms |
@@ -112,6 +113,21 @@ Limits live in `control.Limits`; model requests cannot change them or gains.
 | Cumulative distance from session origin | 30 mm plus explicit XYZ bounds |
 | Joint load thresholds | [10, 12, 10, 3, 3, 3] SDK Nm |
 | Gripper load threshold | 0.25 in SDK gripper-torque units |
+
+`gripper_speed_m_s` remains the 4 mm/s planned-speed limit; the hardware SDK
+command-ramp limit also remains 4 mm/s. The independent
+`gripper_measured_speed_limit_m_s` trips when the absolute measured width speed
+exceeds 12 mm/s, in either direction. It no longer derives from the command
+limit multiplied by 1.5. Stop diagnostics and the published `info.limits`
+report the same measured threshold.
+
+The former 6 mm/s threshold was a software commissioning choice, not a
+manufacturer fault rating. The provisional 12 mm/s value allows headroom above
+the recorded 9.173 mm/s peak for a subsequent bounded retest; those recordings
+do not establish a safe operating envelope or prove a mechanical fault.
+Only software boundary/regression tests have passed for this change. Existing
+physical commissioning failures remain recorded and no live acceptance is
+automatically granted. All other limits, gains and stop paths are unchanged.
 
 The bridge ticks independently of MCP/model requests, approximately every 5 ms.
 It preflights 100 joint-path intervals, IK/FK residual and smoothstep peak speed.

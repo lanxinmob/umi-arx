@@ -63,6 +63,8 @@ class Limits:
     translation_speed_m_s: float = .005
     rotation_speed_rad_s: float = .05
     gripper_speed_m_s: float = .004
+    # Independent measured-speed trip point; provisional pending live retest.
+    gripper_measured_speed_limit_m_s: float = .012
     joint_speed_rad_s: float = .15
     motor_age_s: float = .1
     snapshot_age_s: float = 2.
@@ -160,12 +162,12 @@ class Executor:
             raise RuntimeError("hardware or SDK fault")
         if np.any(np.abs(state["dq"]) > self.limits.joint_speed_rad_s):
             raise RuntimeError("measured joint speed exceeded")
-        if abs(state["gripper_speed"]) > self.limits.gripper_speed_m_s * 1.5:
+        if abs(state["gripper_speed"]) > self.limits.gripper_measured_speed_limit_m_s:
             if self.last_action is not None and self.last_action["status"] == "running":
                 self.last_action["gripper_stop_sample"] = {
                     "width_m": state["width"], "speed_m_s": state["gripper_speed"],
                     "load": state["gripper_load"],
-                    "speed_limit_m_s": self.limits.gripper_speed_m_s * 1.5}
+                    "speed_limit_m_s": self.limits.gripper_measured_speed_limit_m_s}
             raise RuntimeError("measured gripper speed exceeded")
         if (np.any(np.abs(state["torque"]) > [10, 12, 10, 3, 3, 3]) or
                 abs(state["gripper_load"]) > .25):

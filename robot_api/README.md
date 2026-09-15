@@ -123,12 +123,18 @@ finally:
 ## Physical Acceptance
 
 **Not yet accepted for immediate cup-to-tray execution.** The physical gripper
-tripped its measured 6 mm/s guard in four trials. Recorded peaks reached
+tripped the former measured 6 mm/s guard in four trials. Recorded peaks reached
 7.50-9.17 mm/s despite smooth commands. Lower ramp speed and alternative gains
 did not resolve it. Stable loaded holding and a transfer workspace beyond the
 current 30 mm commissioning radius are also unverified. Restarting an API does
 not remove these facts. See [commissioning.json](commissioning.json) and
 [physical test history](../action_mcp/README.md).
+
+The measured gripper-speed threshold is now independently set to a provisional
+12 mm/s (`contract.limits.gripper_measured_speed_limit_m_s`). The command-speed
+limit remains 4 mm/s (`gripper_speed_m_s`), including the SDK ramp. This software
+change still requires a live retest; it does not clear the recorded failed
+commissioning or assert that the observed bursts are safe for grasping.
 
 The API can attach **read-only** to an explicitly started existing live bridge:
 
