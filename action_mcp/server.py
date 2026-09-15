@@ -8,7 +8,10 @@ import time
 
 import zmq
 
-from control import PROTOCOL
+if __package__:
+    from .control import PROTOCOL
+else:
+    from control import PROTOCOL
 
 
 EMPTY = {"type": "object", "properties": {}, "additionalProperties": False}

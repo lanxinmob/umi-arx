@@ -268,22 +268,11 @@ def _ee_to_tcp(ee_pose: np.ndarray) -> np.ndarray:
     ee_to_tcp = np.array([[0, 0, 1], [-1, 0, 0], [0, -1, 0]])
     ee_rotation = np.dot(rotation_z, np.dot(rotation_y, rotation_x))
     tcp_rotation = ee_rotation @ ee_to_tcp
-    theta = np.arccos((np.trace(tcp_rotation) - 1) / 2)
-    if np.isclose(theta, 0):
-        rotation_vector = np.zeros(3)
-    else:
-        axis = np.array(
-            [
-                tcp_rotation[2, 1] - tcp_rotation[1, 2],
-                tcp_rotation[0, 2] - tcp_rotation[2, 0],
-                tcp_rotation[1, 0] - tcp_rotation[0, 1],
-            ]
-        )
-        axis = axis / (2 * np.sin(theta))
-        rotation_vector = theta * axis
+    rotation_vector = cv2.Rodrigues(tcp_rotation)[0].reshape(3)
     angle = np.linalg.norm(rotation_vector)
-    axis = rotation_vector / angle
-    rotation_vector = -axis * (2 * np.pi - angle)
+    # Preserve the existing long-angle convention except at the identity.
+    if angle > 1e-8:
+        rotation_vector *= -(2 * np.pi - angle) / angle
     return np.concatenate([ee_pose[:3], rotation_vector])
 
 
