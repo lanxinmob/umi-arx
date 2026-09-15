@@ -480,6 +480,8 @@ class ObservationMcpServer:
                 params = request.get("params", {})
                 if not isinstance(method, str) or not isinstance(params, dict):
                     raise McpProtocolError(-32600, "invalid method or params")
+                if not has_id and method == "tools/call":
+                    continue
                 result = self.dispatch(method, params)
                 if not has_id or result is None:
                     continue

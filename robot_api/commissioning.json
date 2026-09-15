@@ -1,0 +1,19 @@
+{
+  "robot": "X5_umi/can0",
+  "recorded_on": "2026-09-15",
+  "gripper_bounded_motion": {
+    "status": "failed",
+    "detail": "Four opening trials tripped the 0.006 m/s measured-speed guard; recorded peaks 0.0086167, 0.00750485 and 0.00917257 m/s. Cause unresolved.",
+    "evidence": "action_mcp/README.md: physical gripper diagnostics"
+  },
+  "arm_stable_hold": {
+    "status": "unverified",
+    "detail": "One bounded upward step executed; stable holding after reanchoring and loaded transfer are not established.",
+    "evidence": "action_mcp/README.md: measured settling tests"
+  },
+  "task_workspace": {
+    "status": "unverified",
+    "detail": "The 30 mm commissioning radius is not a validated cup-to-tray transfer workspace.",
+    "evidence": "action_mcp/control.py: Limits.radius_m"
+  }
+}
