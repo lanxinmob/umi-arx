@@ -1,6 +1,7 @@
 """Bounded relative actions and a model-independent execution state machine."""
 
 from dataclasses import asdict, dataclass, replace
+from collections import deque
 import math
 import time
 import uuid
@@ -80,6 +81,11 @@ class Limits:
     minimum_position_step_m: float = .0005
     minimum_rotation_step_rad: float = .001
     minimum_gripper_step_m: float = .0005
+    settle_window_s: float = .2
+    settle_position_m: float = .00025
+    settle_joint_rad: float = .0008
+    settle_rotation_rad: float = .0015
+    settle_gripper_m: float = .0001
 
 
 def action_target(payload, pose, width, limits):
@@ -155,6 +161,11 @@ class Executor:
         if np.any(np.abs(state["dq"]) > self.limits.joint_speed_rad_s):
             raise RuntimeError("measured joint speed exceeded")
         if abs(state["gripper_speed"]) > self.limits.gripper_speed_m_s * 1.5:
+            if self.last_action is not None and self.last_action["status"] == "running":
+                self.last_action["gripper_stop_sample"] = {
+                    "width_m": state["width"], "speed_m_s": state["gripper_speed"],
+                    "load": state["gripper_load"],
+                    "speed_limit_m_s": self.limits.gripper_speed_m_s * 1.5}
             raise RuntimeError("measured gripper speed exceeded")
         if (np.any(np.abs(state["torque"]) > [10, 12, 10, 3, 3, 3]) or
                 abs(state["gripper_load"]) > .25):
@@ -301,7 +312,8 @@ class Executor:
         self.tokens.clear()
         self.active = dict(start=now, duration=duration, q_start=q_start,
                            q_target=q_target, width_start=current["width"], width_target=width,
-                           target=target, settled_since=None, visual=visual, start_pose=current["pose"].copy())
+                           target=target, settled_since=None, settling_samples=deque(),
+                           visual=visual, start_pose=current["pose"].copy())
         requested = [np.linalg.norm(target[:3]-current["pose"][:3]),
                      rotation_error(target[3:], current["pose"][3:]), abs(width-current["width"])]
         defaults = [self.limits.position_tolerance_m, self.limits.rotation_tolerance_rad,
@@ -322,6 +334,9 @@ class Executor:
         now = self.clock()
         gap, self.last_tick = now-self.last_tick, now
         if self.mode in ("disarmed", "stopped"):
+            # The SDK still receives motor feedback while no action is armed.
+            # Drain the independent monitor to avoid stale queued CAN frames.
+            self.backend.read()
             return
         try:
             if gap > self.limits.loop_gap_s:
@@ -366,11 +381,11 @@ class Executor:
                 self.last_action["joint_actual_rad"] = state["q"].tolist()
             if progress is not None:
                 self.last_action["measured_translation"] = progress
+            stationary = self.motion_settled(a, state, now)
             reached = (errors["position_m"] <= a["tolerances"][0] and
                        errors["rotation_rad"] <= a["tolerances"][1] and
                        errors["gripper_m"] <= a["tolerances"][2] and
-                       np.max(np.abs(state["dq"])) < .02 and abs(state["gripper_speed"]) < .001)
-            stationary = np.max(np.abs(state["dq"])) < .02 and abs(state["gripper_speed"]) < .001
+                       stationary)
             visual_complete = (a["visual"] and progress["along_m"] >= .0005 and stationary
                                and errors["gripper_m"] <= self.limits.gripper_tolerance_m)
             if elapsed >= a["duration"] and (reached if not a["visual"] else visual_complete):
@@ -394,6 +409,24 @@ class Executor:
                 raise RuntimeError("no stable forward progress before deadline" if a["visual"] else "target not reached before deadline")
         except Exception as exc:
             self.stop(str(exc))
+
+    def motion_settled(self, action, state, now):
+        # Raw motor velocity bins can cross the completion threshold at rest.
+        # Use measured excursion for completion; check() still enforces speeds.
+        samples = action["settling_samples"]
+        if now-action["start"] < action["duration"]:
+            return False
+        samples.append((now, state["pose"].copy(), state["q"].copy(), state["width"]))
+        cutoff = now-self.limits.settle_window_s
+        while len(samples) > 1 and samples[1][0] <= cutoff:
+            samples.popleft()
+        if now-samples[0][0] < self.limits.settle_window_s:
+            return False
+        poses = np.array([s[1] for s in samples])
+        return (np.linalg.norm(np.ptp(poses[:, :3], axis=0)) <= self.limits.settle_position_m and
+                np.max(np.ptp(np.array([s[2] for s in samples]), axis=0)) <= self.limits.settle_joint_rad and
+                max(rotation_error(poses[0, 3:], p[3:]) for p in poses) <= self.limits.settle_rotation_rad and
+                np.ptp([s[3] for s in samples]) <= self.limits.settle_gripper_m)
 
     def track(self, state, pose, q, width, position_limit=None):
         if (np.linalg.norm(state["pose"][:3]-pose[:3]) > (self.limits.position_tracking_m if position_limit is None else position_limit) or

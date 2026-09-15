@@ -125,6 +125,10 @@ Final tolerances are at most 0.5 mm / 0.005 rad / 1 mm, tightened to 25% of each
 nonzero requested displacement. The target must remain reached for 150 ms;
 staying still cannot pass a microstep simply because it is smaller than the
 absolute tolerance. High contact load is a failure, NOT a successful grasp.
+Completion also requires a 200 ms measured-position stability window (0.25 mm
+XYZ excursion, 0.0008 rad per joint, 0.0015 rad orientation change, 0.1 mm
+gripper excursion). This avoids using coarse instantaneous velocity bins as
+an arrival detector. Independent hard speed checks are unchanged.
 
 Only one action is allowed at a time. Identical latest requests are idempotent;
 other old sequences are rejected. State/info polling does not renew the idle
@@ -149,8 +153,11 @@ reports `execution_mode: visual_steps` and the geometric envelope.
   direction: cross-track at most 1 mm, reverse tolerance 0.5 mm, orientation
   change at most 0.02 rad. Planned displacement cannot exceed the request;
   measured displacement permits a 0.5 mm margin.
-- Translation can finish with at least 0.5 mm forward progress and low measured
-  joint/gripper speed for 150 ms after the requested duration. It returns
+- Translation can finish with at least 0.5 mm forward progress and a stable
+  measured-position window maintained for 150 ms after the requested duration.
+  The 200 ms window limits XYZ excursion to 0.25 mm, each joint's excursion to
+  0.0008 rad, orientation change to 0.0015 rad and gripper excursion to 0.1 mm.
+  Independent measured-speed limits still apply on every control tick. It returns
   `status: executed`, actual translation, errors, and `target_reached`.
 - The holding target is replaced with the measured position. Unachieved travel
   is discarded, not added to the next action. Obtain a new image and state token
@@ -292,6 +299,55 @@ include `last_motion_check` with its interval, before/after poses, derived
 speeds, reported joint velocities and feedback ages. It is the most recent
 speed sample, not necessarily the cause of a non-speed fault. Limits and stop
 behavior are unchanged. Diagnose the speed event before further live motion.
+
+### Continued diagnostics, 2026-09-15
+
+Two seconds of live holding produced a 0.122 mm Z range and a maximum derived
+speed of 2.86 mm/s, without a fault. A 5 mm upward request over 5 seconds then
+advanced 1.34 mm without triggering the speed guard, but failed completion:
+coarse reported joint velocity bins repeatedly reset the settling timer even
+while measured positions were stable. The measured-position window above fixes
+this completion issue without changing position accuracy or hard speed limits.
+
+Live bridge startup also exposed a queue-draining defect: disarmed/stopped
+ticks skipped the CAN monitor while the SDK continued receiving feedback.
+Queued packets became stale before arming. These ticks now read the backend
+without issuing motion commands. After the fix, disarmed live state remained
+fresh and a 5 mm / 5 s upward action returned `executed` with 1.449 mm forward
+progress and 0.122 mm cross-track. `target_reached` was false. The arm later
+settled slightly after the measured-state reanchor; this is not precise holding.
+An idle timeout correctly stopped that session before its next gripper request.
+
+Gripper preparation did not pass. All trials below were finite, opening-only,
+on can0, with fresh scene checks and unchanged 6 mm/s measured-speed and 0.25
+load stop thresholds. They all ended in `measured gripper speed exceeded`:
+
+| Requested opening / duration | Test Kp / Kd | Recorded result |
+| --- | --- | --- |
+| 2 mm / 3 s | 1 / 0.2 | Stopped early; triggering speed was not retained |
+| 2 mm / 5 s | 1 / 0.2 | 8.617 mm/s peak; 0.058 mm width jump over 5.4 ms |
+| 2 mm / 5 s | 1 / 1 | 7.505 mm/s peak; increased damping did not resolve it |
+| 1 mm / 5 s | SDK default 5 / 0.2 | 9.173 mm/s peak; peak recorded load 0.099 |
+
+The diagnostic gain variants were temporary subclasses, never persisted in the
+bridge backend. Production gains remain unchanged. The width changes support
+real short motion bursts, not only a noisy velocity display. Smooth SDK command
+widths, fresh feedback and zero reported CAN bus/receive/transmit errors narrow
+the investigation to low-speed actuator/feedback behavior. They do not prove
+a mechanical defect. Inspect the transmission and verify motor-side low-speed
+control before continuing contact tasks; do not bypass the speed stop to grasp.
+Failed actions now retain `gripper_stop_sample` at a gripper-speed violation,
+separately from the earlier Cartesian `last_motion_check`.
+
+Offline SDK gravity torques near the recorded pose were approximately
+`[0, 0.435, 6.730, 1.797, 0.0018, -0.063]` Nm. This is a model prediction,
+not a measured requirement or permission to enable gravity feedforward.
+Gravity compensation remains off and was not changed during these tests.
+
+Focused inline tests exercised completion with recorded-scale position jitter,
+strict target accuracy, no-motion rejection, drift rejection, hard speed/load/
+staleness stops, and inactive queue draining. No temporary test sources remain.
+All controllers were damped and disconnected. No cup grasp or transfer occurred.
 
 Files: `control.py` defines geometry and execution rules; `backend.py` isolates
 mock/SDK/CAN access; `bridge.py` owns execution; `server.py` exposes MCP tools.
