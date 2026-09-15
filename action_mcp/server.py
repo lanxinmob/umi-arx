@@ -26,7 +26,7 @@ TOOLS = [
     ("get_action_contract", "info", "Read units, frames, limits and backend source; never moves hardware."),
     ("get_action_state", "state", "Read measured state and a short-lived state_token; does not renew control lease."),
     ("arm_action_session", "arm", "Ramp holding gains at current pose; no reset. May move hardware while engaging."),
-    ("execute_action", "action", "Execute one bounded relative action and wait for measured completion or failure."),
+    ("execute_action", "action", "Execute a bounded action. Visual-step status executed reports progress, NOT precise arrival; reobserve before moving again."),
     ("stop_action_session", "stop", "Latch damping and reject further motion until bridge restart; NOT power removal."),
 ]
 

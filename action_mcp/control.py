@@ -1,6 +1,6 @@
 """Bounded relative actions and a model-independent execution state machine."""
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 import math
 import time
 import uuid
@@ -115,9 +115,10 @@ def action_target(payload, pose, width, limits):
 class Executor:
     """Single owner. Call tick at 100 Hz even when no model is connected."""
 
-    def __init__(self, backend, workspace_min, workspace_max, clock=time.monotonic):
+    def __init__(self, backend, workspace_min, workspace_max, clock=time.monotonic, visual_steps=False):
         self.backend, self.clock = backend, clock
-        self.limits = Limits()
+        self.visual_steps = visual_steps
+        self.limits = replace(Limits(), position_step_m=.005) if visual_steps else Limits()
         self.lower, self.upper = np.array(workspace_min), np.array(workspace_max)
         if (self.lower.shape != (3,) or self.upper.shape != (3,) or
                 not np.isfinite(np.r_[self.lower, self.upper]).all() or
@@ -257,6 +258,9 @@ class Executor:
                 abs(current["width"]-state["width"]) > .001):
             raise ValueError("state changed since observation")
         target, width, duration = action_target(payload, current["pose"], current["width"], self.limits)
+        visual = self.visual_steps and any(payload["delta_xyz_m"])
+        if visual and (any(payload["delta_rotvec_rad"]) or payload["gripper_delta_m"] != 0):
+            raise ValueError("visual translation cannot be combined with rotation or gripper motion")
         self.check_workspace(target)
         arm_delta = any(payload["delta_xyz_m"]) or any(payload["delta_rotvec_rad"])
         q_target = self.backend.solve(target, current["q"]) if arm_delta else current["q"].copy()
@@ -267,6 +271,8 @@ class Executor:
         for alpha in np.linspace(0, 1, 101)[1:]:
             pose = self.backend.fk(q_start + alpha*(q_target-q_start))
             self.check_workspace(pose)
+            if visual:
+                self.translation_envelope(current["pose"], target, pose, planned=True)
             if (np.linalg.norm(pose[:3]-previous_pose[:3])*150/duration > self.limits.translation_speed_m_s or
                     rotation_error(pose[3:], previous_pose[3:])*150/duration > self.limits.rotation_speed_rad_s):
                 raise ValueError("planned Cartesian speed exceeded")
@@ -274,7 +280,7 @@ class Executor:
         if (np.max(np.abs(q_target-q_start))*1.5/duration > self.limits.joint_speed_rad_s or
                 abs(width-current["width"])*1.5/duration > self.limits.gripper_speed_m_s):
             raise ValueError("planned joint/gripper speed exceeded")
-        if (np.linalg.norm(previous_pose[:3]-target[:3]) > .00025 or
+        if not visual and (np.linalg.norm(previous_pose[:3]-target[:3]) > .00025 or
                 rotation_error(previous_pose[3:], target[3:]) > .0025):
             raise ValueError("IK returned inaccurate FK result")
         now = self.clock()
@@ -284,7 +290,7 @@ class Executor:
         self.tokens.clear()
         self.active = dict(start=now, duration=duration, q_start=q_start,
                            q_target=q_target, width_start=current["width"], width_target=width,
-                           target=target, settled_since=None)
+                           target=target, settled_since=None, visual=visual, start_pose=current["pose"].copy())
         requested = [np.linalg.norm(target[:3]-current["pose"][:3]),
                      rotation_error(target[3:], current["pose"][3:]), abs(width-current["width"])]
         defaults = [self.limits.position_tolerance_m, self.limits.rotation_tolerance_rad,
@@ -294,8 +300,10 @@ class Executor:
         self.active["tolerances"] = [min(default, .25*distance) if distance > 1e-9 else default
                                      for distance, default in zip(requested, defaults)]
         self.last_action = {"sequence": self.sequence, "status": "running", "request": payload,
+                            "completion_mode": "visual_step" if visual else "target",
                             "start_pose_base_xyz_rpy": current["pose"].tolist(),
-                            "target_pose_base_xyz_rpy": target.tolist(), "target_width_m": width}
+                            "target_pose_base_xyz_rpy": target.tolist(), "target_width_m": width,
+                            "planned_pose_base_xyz_rpy": previous_pose.tolist()}
         self.mode, self.reason = "moving", "bounded action"
         return self.last_action
 
@@ -331,41 +339,82 @@ class Executor:
             q = a["q_start"] + alpha*(a["q_target"]-a["q_start"])
             width = a["width_start"] + alpha*(a["width_target"]-a["width_start"])
             pose = self.backend.fk(q)
-            self.track(state, pose, q, width)
+            progress = None
+            if a["visual"]:
+                progress = self.translation_envelope(a["start_pose"], a["target"], state["pose"])
+            self.track(state, pose, q, width,
+                       position_limit=self.limits.position_step_m+.0005 if a["visual"] else None)
             self.backend.command(q, width)
             errors = {"position_m": float(np.linalg.norm(state["pose"][:3]-a["target"][:3])),
                       "rotation_rad": rotation_error(state["pose"][3:], a["target"][3:]),
                       "gripper_m": abs(state["width"]-a["width_target"])}
             self.last_action.update(errors=errors, actual_pose_base_xyz_rpy=state["pose"].tolist(),
                                     actual_width_m=state["width"])
+            if "q_command" in state:
+                self.last_action["joint_command_rad"] = state["q_command"].tolist()
+                self.last_action["joint_actual_rad"] = state["q"].tolist()
+            if progress is not None:
+                self.last_action["measured_translation"] = progress
             reached = (errors["position_m"] <= a["tolerances"][0] and
                        errors["rotation_rad"] <= a["tolerances"][1] and
                        errors["gripper_m"] <= a["tolerances"][2] and
                        np.max(np.abs(state["dq"])) < .02 and abs(state["gripper_speed"]) < .001)
-            if elapsed >= a["duration"] and reached:
+            stationary = np.max(np.abs(state["dq"])) < .02 and abs(state["gripper_speed"]) < .001
+            visual_complete = (a["visual"] and progress["along_m"] >= .0005 and stationary
+                               and errors["gripper_m"] <= self.limits.gripper_tolerance_m)
+            if elapsed >= a["duration"] and (reached if not a["visual"] else visual_complete):
                 if a["settled_since"] is None:
                     a["settled_since"] = now
                 if now-a["settled_since"] >= .15:
-                    self.last_action["status"] = "succeeded"
-                    self.reference = dict(pose=a["target"], q=a["q_target"], width=a["width_target"])
-                    self.mode, self.reason, self.idle_since = "ready", "measured target reached", now
+                    self.last_action["status"] = "executed" if a["visual"] else "succeeded"
+                    self.last_action["target_reached"] = bool(reached)
+                    if a["visual"]:
+                        # Drop the remaining position demand; the next action
+                        # must be based on a fresh observation, not catch-up.
+                        self.backend.command(state["q"], state["width"])
+                        self.reference = dict(pose=state["pose"].copy(), q=state["q"].copy(), width=state["width"])
+                    else:
+                        self.reference = dict(pose=a["target"], q=a["q_target"], width=a["width_target"])
+                    self.mode, self.reason, self.idle_since = "ready", "visual step executed" if a["visual"] else "measured target reached", now
                     self.active = None
             else:
                 a["settled_since"] = None
             if self.active is not None and elapsed > a["duration"]+self.limits.settle_timeout_s:
-                raise RuntimeError("target not reached before deadline")
+                raise RuntimeError("no stable forward progress before deadline" if a["visual"] else "target not reached before deadline")
         except Exception as exc:
             self.stop(str(exc))
 
-    def track(self, state, pose, q, width):
-        if (np.linalg.norm(state["pose"][:3]-pose[:3]) > self.limits.position_tracking_m or
+    def track(self, state, pose, q, width, position_limit=None):
+        if (np.linalg.norm(state["pose"][:3]-pose[:3]) > (self.limits.position_tracking_m if position_limit is None else position_limit) or
                 rotation_error(state["pose"][3:], pose[3:]) > self.limits.rotation_tracking_rad or
                 np.max(np.abs(state["q"]-q)) > self.limits.joint_tracking_rad or
                 abs(state["width"]-width) > self.limits.gripper_tracking_m):
             raise RuntimeError("tracking error exceeded")
 
+    def translation_envelope(self, start, target, actual, planned=False):
+        wanted = target[:3]-start[:3]
+        distance = float(np.linalg.norm(wanted))
+        direction = wanted/distance
+        displacement = actual[:3]-start[:3]
+        along = float(displacement @ direction)
+        cross = float(np.linalg.norm(displacement-along*direction))
+        margin = 0. if planned else .0005
+        if (np.linalg.norm(displacement) > distance+margin+1e-12 or along < -.0005 or
+                cross > .001 or rotation_error(start[3:], actual[3:]) > .02):
+            raise RuntimeError("visual step direction/amplitude envelope exceeded")
+        return {"along_m": along, "cross_m": cross, "delta_base_m": displacement.tolist()}
+
     def info(self):
         return {"protocol": PROTOCOL, "source": self.backend.source, "model": "X5_umi", "interface": "can0",
+                "execution_mode": "visual_steps" if self.visual_steps else "strict_targets",
+                "visual_translation": {"enabled": self.visual_steps,
+                                       "minimum_progress_m": .0005,
+                                       "measured_amplitude_margin_m": .0005,
+                                       "reverse_tolerance_m": .0005,
+                                       "cross_track_limit_m": .001,
+                                       "orientation_change_limit_rad": .02,
+                                       "completion_status": "executed",
+                                       "requires_reobservation": True},
                 "limits": asdict(self.limits), "workspace_min_m": self.lower.tolist(),
                 "workspace_max_m": self.upper.tolist(),
                 "tool_frame": "SDK eef_link; not observation TCP or camera frame",

@@ -49,6 +49,8 @@ Use `--port` on both processes to change the port.
    the action MCP. Use the returned `session`, `next_sequence`, `state_token`.
 4. `execute_action`: submit one bounded delta. The MCP tool waits for measured
    completion or failure, and returns the target, actual pose and errors.
+   In optional visual-step mode, `executed` means bounded forward progress,
+   not precise arrival. Inspect `target_reached` separately and reobserve.
 5. Repeat observations/actions without requiring a human confirmation for each
    step. End with `stop_action_session`.
 
@@ -132,6 +134,30 @@ armed the session. Explicit stop, feedback failure, load/tracking failure or
 deadline expiration latches damping. There is no remote reset, fault-clear,
 gain-change or auto-rearm command. Restart the bridge only after resolving the
 cause and checking the scene.
+
+## Optional visual steps
+
+Add `--visual-steps` to the bridge command (mock or live). No model-side flag
+can enable it. The action schema remains unchanged; `get_action_contract`
+reports `execution_mode: visual_steps` and the geometric envelope.
+
+- Maximum translation becomes 5 mm. Use at least 1.5 seconds for a full 5 mm
+  straight step to respect smoothstep peak speed; 2 seconds is suitable.
+- Translation cannot be combined with rotation or gripper motion. Pure rotation
+  and gripper actions retain strict target completion.
+- Both the planned FK path and measured motion must follow the requested
+  direction: cross-track at most 1 mm, reverse tolerance 0.5 mm, orientation
+  change at most 0.02 rad. Planned displacement cannot exceed the request;
+  measured displacement permits a 0.5 mm margin.
+- Translation can finish with at least 0.5 mm forward progress and low measured
+  joint/gripper speed for 150 ms after the requested duration. It returns
+  `status: executed`, actual translation, errors, and `target_reached`.
+- The holding target is replaced with the measured position. Unachieved travel
+  is discarded, not added to the next action. Obtain a new image and state token
+  before choosing the next move. Tokens enforce fresh telemetry, not image use.
+- No progress, wrong direction, excessive excursion, stale feedback, loads,
+  joint limits, velocity limits, tracking guards and deadlines still stop the
+  session. This mode is not permission to disable hardware safety mechanisms.
 
 ## Live commissioning
 
@@ -226,6 +252,26 @@ position-loop response still need diagnosis; do not assume the cause is gain,
 friction or gravity without further evidence. Accurate motion and a successful
 pick-and-place remain unverified. Software damping was exercised; a physical
 emergency stop/power-loss test was not performed.
+
+### Visual-step verification, 2026-09-15
+
+Thirteen hardware-free tests passed: strict-mode regression, full and partial
+visual progress, measured-state reanchoring, no-motion rejection, mixed-action
+rejection, direction/amplitude/orientation bounds, runtime reverse motion,
+load and stale-feedback stops, replay handling, loop/idle deadlines and mode
+reporting. Tests were run inline; no test source files were retained.
+An actual stdio MCP proxy and JSON mock bridge also passed a 5 mm action,
+returned `executed` with measured displacement, and latched stop on proxy EOF.
+Both test processes exited normally.
+
+Using the historical joint pose and the real SDK solver without a controller,
+a 5 mm base-Z request predicted 4.997 mm upward travel, about 0.0024 mm lateral
+travel and 0.00979 rad orientation change. The sampled geometric envelope
+passed. These are offline kinematics, not measured hardware motion.
+
+The latest camera check showed a person with arms over the adjacent task desk.
+No hardware controller was started for this visual-step verification; clear
+the robot working envelope before a live probe. Cup transfer remains undone.
 
 Files: `control.py` defines geometry and execution rules; `backend.py` isolates
 mock/SDK/CAN access; `bridge.py` owns execution; `server.py` exposes MCP tools.

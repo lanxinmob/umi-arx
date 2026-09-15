@@ -185,6 +185,7 @@ class HardwareBackend:
         state = self.controller.get_joint_state()
         q = state.pos().copy()
         return dict(pose=self.fk(q), q=q, dq=state.vel().copy(), torque=state.torque().copy(),
+                    q_command=self.controller.get_joint_cmd().pos().copy(),
                     width=state.gripper_pos, gripper_speed=state.gripper_vel,
                     gripper_load=state.gripper_torque, motor_received=self.can.received.copy(),
                     emergency=self.controller.is_emergency(), motor_fault=self.can.fault)

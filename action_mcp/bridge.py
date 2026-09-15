@@ -16,6 +16,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--live", action="store_true")
     parser.add_argument("--allow-hardware-enable", action="store_true")
+    parser.add_argument("--visual-steps", action="store_true",
+                        help="allow bounded 5 mm translation steps with observed progress, not precise arrival")
     parser.add_argument("--sdk", default="/home/hjadmin/projects/arx5-sdk")
     parser.add_argument("--port", type=int, default=8766)
     parser.add_argument("--workspace-min", nargs=3, type=float)
@@ -28,7 +30,7 @@ def main():
     lower = args.workspace_min if args.workspace_min is not None else [.29, -.03, .13]
     upper = args.workspace_max if args.workspace_max is not None else [.35, .03, .19]
     # Validate configuration and bind the service before touching hardware.
-    Executor(MockBackend(), lower, upper)
+    Executor(MockBackend(), lower, upper, visual_steps=args.visual_steps)
     context = zmq.Context()
     socket = context.socket(zmq.REP)
     socket.setsockopt(zmq.LINGER, 0)
@@ -46,7 +48,7 @@ def main():
     try:
         socket.bind("tcp://127.0.0.1:" + str(args.port))
         backend = HardwareBackend(args.sdk) if args.live else MockBackend()
-        executor = Executor(backend, lower, upper)
+        executor = Executor(backend, lower, upper, visual_steps=args.visual_steps)
         print(json.dumps({"bridge": PROTOCOL, "source": backend.source, "port": args.port}), flush=True)
         while running:
             executor.tick()
