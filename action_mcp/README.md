@@ -125,9 +125,10 @@ The former 6 mm/s threshold was a software commissioning choice, not a
 manufacturer fault rating. The provisional 12 mm/s value allows headroom above
 the recorded 9.173 mm/s peak for a subsequent bounded retest; those recordings
 do not establish a safe operating envelope or prove a mechanical fault.
-Only software boundary/regression tests have passed for this change. Existing
-physical commissioning failures remain recorded and no live acceptance is
-automatically granted. All other limits, gains and stop paths are unchanged.
+Software boundary/regression tests passed. The subsequent live 1 mm opening
+retest stayed below the new speed threshold but failed target completion; see
+the result below. Physical commissioning failures remain recorded and no live
+acceptance is granted. All other limits, gains and stop paths are unchanged.
 
 The bridge ticks independently of MCP/model requests, approximately every 5 ms.
 It preflights 100 joint-path intervals, IK/FK residual and smoothstep peak speed.
@@ -364,6 +365,33 @@ Focused inline tests exercised completion with recorded-scale position jitter,
 strict target accuracy, no-motion rejection, drift rejection, hard speed/load/
 staleness stops, and inactive queue draining. No temporary test sources remain.
 All controllers were damped and disconnected. No cup grasp or transfer occurred.
+
+### Gripper threshold live retest, 2026-09-15
+
+The main arm X5_umi/can0 was tested with the new 12 mm/s measured-speed
+threshold, unchanged 4 mm/s command limit and unchanged Kp/Kd of 1/0.2.
+The arm position target was held constant. One opening command requested
+1 mm over 5 seconds, followed by the existing 1 second settling allowance.
+
+- Measured starting width: 20.248614 mm; target: 21.248614 mm.
+- Last action width: 20.364402 mm, only 0.115787 mm of opening.
+- Remaining error: 0.884213 mm; result: `target not reached before deadline`.
+- Maximum absolute sampled speed: 1.945709 mm/s across 562 client samples.
+  This is a sampled maximum, not a guarantee about every motor update.
+- Absolute sampled gripper load remained at or below 0.061504 SDK units.
+- Maximum sampled arm translation from the engagement pose: 0.121765 mm.
+- No speed stop occurred. Damping was requested and the bridge exited with code 0.
+
+This demonstrates that increasing the speed threshold alone did not resolve
+small-command tracking. It does not identify a mechanical fault or validate a
+grasp. The physical acceptance remains failed; no cup approach or transfer was
+performed. The first harness startup mistakenly parsed an SDK log as a bridge
+ready message and shut down before submitting an action; a corrected reader
+accepted only the protocol ready JSON for the actual test above.
+
+Detailed local evidence and before/after images:
+`robot_api/runs/live_retest_1789449396949415196/` (relative to repository root).
+No temporary test source was retained.
 
 Files: `control.py` defines geometry and execution rules; `backend.py` isolates
 mock/SDK/CAN access; `bridge.py` owns execution; `server.py` exposes MCP tools.

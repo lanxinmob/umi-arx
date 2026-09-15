@@ -132,9 +132,10 @@ not remove these facts. See [commissioning.json](commissioning.json) and
 
 The measured gripper-speed threshold is now independently set to a provisional
 12 mm/s (`contract.limits.gripper_measured_speed_limit_m_s`). The command-speed
-limit remains 4 mm/s (`gripper_speed_m_s`), including the SDK ramp. This software
-change still requires a live retest; it does not clear the recorded failed
-commissioning or assert that the observed bursts are safe for grasping.
+limit remains 4 mm/s (`gripper_speed_m_s`), including the SDK ramp. The subsequent
+live 1 mm / 5 s opening retest stayed below the speed threshold but moved only
+0.116 mm and failed target completion. It does not clear the recorded failed
+commissioning or establish reliable grasping. See the latest physical test history.
 
 The API can attach **read-only** to an explicitly started existing live bridge:
 

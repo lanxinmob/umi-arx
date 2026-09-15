@@ -3,8 +3,8 @@
   "recorded_on": "2026-09-15",
   "gripper_bounded_motion": {
     "status": "failed",
-    "detail": "Four opening trials tripped the 0.006 m/s measured-speed guard; recorded peaks 0.0086167, 0.00750485 and 0.00917257 m/s. Cause unresolved.",
-    "evidence": "action_mcp/README.md: physical gripper diagnostics"
+    "detail": "The latest 1 mm / 5 s opening trial with the 0.012 m/s measured-speed threshold did not trip speed protection, but moved only 0.115787 mm and failed target completion. Maximum sampled speed was 0.00194571 m/s. Earlier trials tripped the former 0.006 m/s guard; insufficient tracking remains unresolved.",
+    "evidence": "action_mcp/README.md: Gripper threshold live retest; robot_api/runs/live_retest_1789449396949415196/result.json"
   },
   "arm_stable_hold": {
     "status": "unverified",
