@@ -79,6 +79,8 @@ class CanFeedback:
         self.received = np.full(7, -1.)
         self.fault = False
         self.local_tx_seen = False
+        self.initializing = True
+        self.dm_status = {}
 
     def ingest(self, packet, ancillary, flags, now, wall):
         if flags & socket.MSG_DONTROUTE:
@@ -92,7 +94,11 @@ class CanFeedback:
         cid, dlc, data = struct.unpack("=IB3x8s", packet)
         if cid == 0 and dlc == 8 and data[0] & 15 in (5, 6, 7, 8):
             mid = data[0] & 15
-            self.fault |= data[0] >> 4 != 1
+            status = data[0] >> 4
+            self.dm_status[mid] = status
+            # SDK startup briefly disables DM motors before enabling them.
+            # Real faults always latch; disabling after startup also latches.
+            self.fault |= status not in (0, 1) or (status == 0 and not self.initializing)
         elif cid in (1, 2, 4) and dlc == 8 and data[0] >> 5 == 1:
             mid = cid
             self.fault |= (data[0] & 31) != 0
@@ -124,6 +130,16 @@ class CanFeedback:
 
     def close(self):
         self.socket.close()
+
+    def finish_initialization(self):
+        self.poll()
+        if self.fault:
+            raise RuntimeError("CAN fault during initialization")
+        if any(self.dm_status.get(mid) != 1 for mid in (5, 6, 7, 8)):
+            raise RuntimeError("not all DM motors are enabled after initialization")
+        if np.max(time.monotonic()-self.received) > .1:
+            raise RuntimeError("stale motor feedback after initialization")
+        self.initializing = False
 
 
 class HardwareBackend:
@@ -159,6 +175,7 @@ class HardwareBackend:
             while time.monotonic() < until:
                 self.can.poll()
                 time.sleep(.005)
+            self.can.finish_initialization()
         except BaseException:
             self.close()
             raise

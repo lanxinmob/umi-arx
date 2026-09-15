@@ -135,8 +135,9 @@ cause and checking the scene.
 
 ## Live commissioning
 
-**Not run as part of this software preparation.** Do not confuse mock or
-offline kinematics results with physical direction, tracking or stop tests.
+**Not yet passed on hardware; see the latest commissioning result below.**
+Do not confuse mock or offline kinematics results with physical direction,
+tracking or stop tests.
 Ensure the arm is supported, the local movement envelope is clear, and the
 physical stop is accessible. Stop every other controller on can0. The file
 lock prevents duplicate instances of this bridge; the initial CAN sender check
@@ -200,7 +201,31 @@ its legacy configuration, including the old watchdog's read-as-activity issue.
   native IK returned excessive orientation residual. Full six-axis physical
   control is **not** verified. The native solver header uses `EPS_=1e-4`; the
   guard independently verifies the unweighted geometric residual.
-- No hardware enable, motion, calibration or live stop test was performed.
+- The initial software verification did not enable hardware or test live motion.
+
+### Live commissioning, 2026-09-15
+
+The SDK's startup clear/enable sequence produced a DM status-0 reply, for
+example `057f807fe7fc1e1b`. Status 0 is disabled, not a hardware error. The CAN
+monitor now allows it only during initialization, then requires fresh feedback
+from all seven motors and enabled status from all four DM motors. Actual fault
+codes still latch during startup, and any subsequent disable latches a fault.
+Eight focused, hardware-free checks covered these transitions and passed;
+no temporary test source files were retained.
+
+After that fix, startup and the one-second holding-gain ramp passed on can0.
+A 1 mm base-Z upward request was accepted. Measured upward travel was only
+0.114 mm; final position error was 0.886 mm (allowed 0.25 mm for this request).
+The action failed with `target not reached before deadline`, entered latched
+damping, and the controller disconnected normally. The return action and
+pick-and-place were not executed. Gripper width remained about 18.45 mm.
+
+Offline FK of the corresponding IK target predicts 0.947 mm upward travel,
+with 0.093 mm position residual. Actual transmitted motor targets and physical
+position-loop response still need diagnosis; do not assume the cause is gain,
+friction or gravity without further evidence. Accurate motion and a successful
+pick-and-place remain unverified. Software damping was exercised; a physical
+emergency stop/power-loss test was not performed.
 
 Files: `control.py` defines geometry and execution rules; `backend.py` isolates
 mock/SDK/CAN access; `bridge.py` owns execution; `server.py` exposes MCP tools.
