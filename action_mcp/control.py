@@ -136,6 +136,7 @@ class Executor:
         self.origin = None
         self.reference = None
         self.previous = None
+        self.motion_check = None
 
     def check(self, state):
         now = self.clock()
@@ -166,9 +167,18 @@ class Executor:
             prev_time, prev = self.previous
             dt = now - prev_time
             if dt >= .04:
-                if np.linalg.norm(state["pose"][:3]-prev[:3])/dt > self.limits.translation_speed_m_s * 1.5:
+                translation_speed = float(np.linalg.norm(state["pose"][:3]-prev[:3])/dt)
+                angular_speed = rotation_error(state["pose"][3:], prev[3:])/dt
+                self.motion_check = {"interval_s": dt,
+                                     "previous_pose_base_xyz_rpy": prev.tolist(),
+                                     "current_pose_base_xyz_rpy": state["pose"].tolist(),
+                                     "translation_speed_m_s": translation_speed,
+                                     "rotation_speed_rad_s": angular_speed,
+                                     "joint_velocity_rad_s": state["dq"].tolist(),
+                                     "motor_feedback_age_s": ages.tolist()}
+                if translation_speed > self.limits.translation_speed_m_s * 1.5:
                     raise RuntimeError("measured translation speed exceeded")
-                if rotation_error(state["pose"][3:], prev[3:])/dt > self.limits.rotation_speed_rad_s * 1.5:
+                if angular_speed > self.limits.rotation_speed_rad_s * 1.5:
                     raise RuntimeError("measured rotation speed exceeded")
                 self.previous = (now, state["pose"].copy())
         else:
@@ -184,7 +194,8 @@ class Executor:
         self.mode, self.reason = "stopped", reason
         self.tokens.clear()
         if self.last_action is not None and self.last_action["status"] == "running":
-            self.last_action.update(status="failed", reason=reason)
+            self.last_action.update(status="failed", reason=reason,
+                                    last_motion_check=self.motion_check)
         self.active = None
         self.backend.stop()
 

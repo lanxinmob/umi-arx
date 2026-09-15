@@ -269,9 +269,29 @@ a 5 mm base-Z request predicted 4.997 mm upward travel, about 0.0024 mm lateral
 travel and 0.00979 rad orientation change. The sampled geometric envelope
 passed. These are offline kinematics, not measured hardware motion.
 
-The latest camera check showed a person with arms over the adjacent task desk.
-No hardware controller was started for this visual-step verification; clear
-the robot working envelope before a live probe. Cup transfer remains undone.
+The first camera check showed a person with arms over the adjacent task desk,
+so the initial verification remained offline. After the operator reported
+withdrawal, a fresh camera image confirmed the nearby seat was empty.
+
+One live can0 probe then requested base-Z +5 mm over 2 seconds with unchanged
+gripper width. Startup and holding ramp passed. The action stopped early with
+`measured translation speed exceeded`: the last reported displacement was
++0.559 mm upward and 0.122 mm cross-track. Width remained about 18.45 mm.
+The SDK command and measured joints differed, confirming that a nonzero target
+was present; this does not establish accurate control or the cause of lag.
+The controller entered damping and disconnected normally. No grasp, subsequent
+move or automatic restart occurred. Cup transfer remains undone.
+
+The speed guard uses position differences over intervals of at least 40 ms.
+An offline sensitivity calculation at the recorded pose, assuming a
+25/65535 rad encoder count, found that a one-count change on every joint can
+produce about 0.502 mm FK displacement (12.55 mm/s over 40 ms). This identifies
+quantization sensitivity, but does not prove the live stop was a false alarm.
+The old trace did not retain the triggering sample pair. Failed actions now
+include `last_motion_check` with its interval, before/after poses, derived
+speeds, reported joint velocities and feedback ages. It is the most recent
+speed sample, not necessarily the cause of a non-speed fault. Limits and stop
+behavior are unchanged. Diagnose the speed event before further live motion.
 
 Files: `control.py` defines geometry and execution rules; `backend.py` isolates
 mock/SDK/CAN access; `bridge.py` owns execution; `server.py` exposes MCP tools.
