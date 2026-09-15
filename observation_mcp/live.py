@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import json
 import math
 import os
@@ -44,6 +44,7 @@ class CameraConfig:
 class RobotConfig:
     endpoint: str
     timeout_ms: int
+    action_protocol: bool = False
 
 
 @dataclass(frozen=True)
@@ -164,8 +165,14 @@ class RobotStateClient:
     ) -> tuple[dict[str, Any], int]:
         assert self.socket is not None
         try:
-            self.socket.send_pyobj({"cmd": "GET_STATE", "data": None})
-            reply = self.socket.recv_pyobj()
+            if self.config.action_protocol:
+                self.socket.send_json(
+                    {"protocol": "umi-arx.action.v1", "command": "state", "data": {}}
+                )
+                reply = _action_state_envelope(self.socket.recv_json())
+            else:
+                self.socket.send_pyobj({"cmd": "GET_STATE", "data": None})
+                reply = self.socket.recv_pyobj()
         except zmq.ZMQError as exc:
             self._connect()
             raise TimeoutError(
@@ -178,6 +185,8 @@ class RobotStateClient:
         raw = reply.get("data")
         if not isinstance(raw, dict):
             raise RuntimeError("robot server returned invalid GET_STATE data")
+        if raw.get("emergency", False):
+            raise RuntimeError("robot emergency is latched")
         state = _normalize_robot_state(
             raw,
             received_at_unix_ns=received_at_unix_ns,
@@ -190,6 +199,25 @@ class RobotStateClient:
             self.socket.close(linger=0)
             self.socket = None
         self.context.term()
+
+
+def _action_state_envelope(reply: Any) -> dict[str, Any]:
+    if not isinstance(reply, dict) or reply.get("ok") is not True:
+        raise RuntimeError("action bridge rejected the state request")
+    state = reply.get("result")
+    if (not isinstance(state, dict) or state.get("protocol") != "umi-arx.action.v1"
+            or state.get("source") != "live" or state.get("healthy") is not True):
+        raise RuntimeError("action bridge must return healthy live feedback, not mock/stale data")
+    fields = {
+        "timestamp": "source_timestamp_s", "ee_pose": "ee_pose_base_xyz_rpy",
+        "joint_pos": "joint_position_rad", "joint_vel": "joint_velocity_rad_s",
+        "joint_torque": "joint_torque_nm", "gripper_pos": "gripper_width_m",
+        "gripper_vel": "gripper_velocity_m_s", "gripper_torque": "gripper_torque",
+    }
+    try:
+        return {"cmd": "GET_STATE", "data": {old: state[new] for old, new in fields.items()}}
+    except KeyError as exc:
+        raise RuntimeError("action bridge state is incomplete") from exc
 
 
 def _vector(raw: dict[str, Any], key: str, size: int | None = None) -> np.ndarray:
@@ -301,9 +329,20 @@ def _resize_center_crop(
 class LiveObservationProvider:
     source = "live"
 
-    def __init__(self, config_path: str) -> None:
+    def __init__(self, config_path: str, action_port: int | None = None) -> None:
         self.config_path = os.path.abspath(config_path)
         self.config = LiveConfig.from_path(self.config_path)
+        if action_port is not None:
+            if type(action_port) is not int or not 1 <= action_port <= 65535:
+                raise ValueError("action_port must be an integer in [1, 65535]")
+            self.config = replace(
+                self.config,
+                robot=RobotConfig(
+                    endpoint=f"tcp://127.0.0.1:{action_port}",
+                    timeout_ms=self.config.robot.timeout_ms,
+                    action_protocol=True,
+                ),
+            )
         capacity = max(
             2,
             math.ceil(

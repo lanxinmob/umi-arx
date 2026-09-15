@@ -3,6 +3,12 @@
 Read-only MCP server for synchronized camera, arm, and gripper observations.
 The fixed payload protocol is `umi-arx.observation.v1`.
 
+For the new [bounded action bridge](../action_mcp/README.md), run this server
+with `--action-port 8766`. It then reads JSON state from that bridge instead of
+the legacy controller below. Do not run both motor controllers on can0. Camera
+configuration and the observation protocol remain unchanged; mock or unhealthy
+action-bridge feedback is rejected in live observation mode.
+
 ## Run
 
 The checked-in [config.json](config.json) matches camera index `0` from the

@@ -522,6 +522,10 @@ def _parse_args() -> argparse.Namespace:
         default=os.path.join(os.path.dirname(__file__), "config.json"),
         help="live camera, robot, and sampling JSON configuration",
     )
+    parser.add_argument(
+        "--action-port", type=int,
+        help="read robot state from the JSON action bridge instead of the legacy controller",
+    )
     return parser.parse_args()
 
 
@@ -532,7 +536,7 @@ def main() -> None:
     else:
         from live import LiveObservationProvider
 
-        provider = LiveObservationProvider(args.config)
+        provider = LiveObservationProvider(args.config, action_port=args.action_port)
     try:
         ObservationMcpServer(provider).serve_stdio()
     finally:
