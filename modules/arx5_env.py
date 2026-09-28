@@ -351,7 +351,19 @@ class Arx5Env:
         last_robots_data = list()
         # 125/500 hz, robot_receive_timestamp
         for robot in self.robots:
-            last_robots_data.append(robot.get_all_state())
+            robot_data = robot.get_all_state()
+            if not robot.is_alive():
+                raise RuntimeError(
+                    f"ARX5 controller exited (exitcode={robot.exitcode}). "
+                    "Check the controller traceback and robot ZMQ server."
+                )
+            if len(robot_data["robot_timestamp"]) < 2:
+                raise RuntimeError(
+                    "ARX5 observation requires at least two robot states; "
+                    f"received {len(robot_data['robot_timestamp'])}. "
+                    "The controller has not produced enough data or its buffer was reset."
+                )
+            last_robots_data.append(robot_data)
 
         # select align_camera_idx
         num_obs_cameras = len(self.robots)

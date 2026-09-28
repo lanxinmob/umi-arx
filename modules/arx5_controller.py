@@ -113,15 +113,32 @@ class Arx5Controller(mp.Process):
     def start_wait(self):
         print(f"[Arx5Controller] Waiting for controller process to be ready")
         print(f"{self.launch_timeout=}")
-        self.ready_event.wait(self.launch_timeout)
-        assert self.is_alive()
+        deadline = time.monotonic() + self.launch_timeout
+        while not self.is_ready:
+            if not self.is_alive():
+                raise RuntimeError(
+                    f"ARX5 controller exited during startup (exitcode={self.exitcode}). "
+                    "Check the controller traceback and robot ZMQ server."
+                )
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError(
+                    f"ARX5 controller not ready after {self.launch_timeout}s: "
+                    f"{self.ring_buffer.count} states received from "
+                    f"{self.robot_ip}:{self.robot_port}. Check the robot server."
+                )
+            time.sleep(min(0.05, remaining))
 
     def stop_wait(self):
         self.join()
 
     @property
     def is_ready(self):
-        return self.ready_event.is_set()
+        return (
+            self.ready_event.is_set()
+            and self.is_alive()
+            and self.ring_buffer.count >= 2
+        )
 
     # ========= context manager ===========
     def __enter__(self):
@@ -440,8 +457,8 @@ class Arx5Controller(mp.Process):
                 # regulate frequency
                 t_wait_util = t_start + (iter_idx + 1) * dt
                 precise_wait(t_wait_util, time_func=time.monotonic)
-                # first loop successful, ready to receive command
-                if iter_idx == 0:
+                # Pose interpolation requires at least two received states.
+                if not self.ready_event.is_set() and self.ring_buffer.count >= 2:
                     self.ready_event.set()
                     if self.verbose:
                         print("[Arx5Controller] Controller process is ready")
@@ -450,9 +467,9 @@ class Arx5Controller(mp.Process):
                 #     print(f"[Arx5Controller] Actual frequency {1/(time.monotonic() - t_now)} Hz")
 
         finally:
+            self.ready_event.clear()
             print("[Arx5Controller] Setting robot to damping")
             self.robot_client.set_to_damping()
             del self.robot_client
-            self.ready_event.set()
             if self.verbose:
                 print("[Arx5Controller] Controller process terminated")
