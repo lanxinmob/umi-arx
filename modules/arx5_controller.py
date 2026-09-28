@@ -239,8 +239,8 @@ class Arx5Controller(mp.Process):
 
             dt = 1 / self.frequency
             self.robot_client.get_state()
-            curr_pose = self.robot_client.tcp_pose
-            curr_gripper_pos = self.robot_client.gripper_pos
+            curr_pose = self.robot_client.tcp_command_pose
+            curr_gripper_pos = self.robot_client.gripper_command_pos
             curr_t = time.monotonic()
             last_waypoint_time = curr_t
             pose_interp = PoseTrajectoryInterpolator(
@@ -342,8 +342,8 @@ class Arx5Controller(mp.Process):
                         if self.verbose:
                             print(f"[Arx5Controller] Reset to home")
 
-                        curr_pose = self.robot_client.tcp_pose
-                        curr_gripper_pos = self.robot_client.gripper_pos
+                        curr_pose = self.robot_client.tcp_command_pose
+                        curr_gripper_pos = self.robot_client.gripper_command_pos
                         curr_t = time.monotonic()
                         last_waypoint_time = curr_t
                         pose_interp = PoseTrajectoryInterpolator(

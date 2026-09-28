@@ -287,6 +287,29 @@ class Arx5Client:
         tcp_pose[:] = ee2tcp(self.ee_pose)
         return tcp_pose
 
+    @property
+    def tcp_command_pose(self):
+        pose = self.latest_state.get("ee_cmd_pose")
+        if pose is None:
+            raise RuntimeError(
+                "Robot server GET_STATE must provide ee_cmd_pose for safe startup. "
+                "Restart the updated ARX5 ZMQ server."
+            )
+        pose = np.asarray(pose, dtype=np.float64)
+        if pose.shape != (6,) or not np.isfinite(pose).all():
+            raise ValueError(f"Invalid ee_cmd_pose from robot server: {pose}")
+        return ee2tcp(pose)
+
+    @property
+    def gripper_command_pos(self):
+        position = self.latest_state.get("gripper_cmd_pos")
+        if position is None or not np.isfinite(position):
+            raise RuntimeError(
+                "Robot server GET_STATE must provide a finite gripper_cmd_pos. "
+                "Restart the updated ARX5 ZMQ server."
+            )
+        return float(position)
+
     def __del__(self):
         self.socket.close()
         self.context.term()
