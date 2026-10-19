@@ -225,6 +225,11 @@ class Arx5Client:
             raise ValueError(f"Invalid joint position: {joint_pos}")
         if gripper_pos is None:
             gripper_pos = self.gripper_pos
+        if not np.isfinite(gripper_pos):
+            raise ValueError(f"Invalid gripper position: {gripper_pos}")
+        # The feedback can briefly exceed the command range after calibration;
+        # the joint server rejects such commands, so clamp at the protocol edge.
+        gripper_pos = float(np.clip(gripper_pos, 0.0, GRIPPER_WIDTH))
         reply_msg = self.send_recv(
             {
                 "cmd": "SET_JOINT_POS",
