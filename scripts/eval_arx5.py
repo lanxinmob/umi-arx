@@ -604,6 +604,12 @@ def main(
                         # is intentionally not used here.
                         precise_wait(t_sample)
                         sm_state = sm.get_motion_state_transformed()
+                        if np.any(np.abs(sm_state) > 1e-9):
+                            print(
+                                f"Joint teleop input: {sm_state}; "
+                                f"delta={np.asarray(sm_state) * (0.5 / frequency)}",
+                                flush=True,
+                            )
                         robot_states = env.get_robot_state()
                         action_parts = []
                         for state in robot_states:

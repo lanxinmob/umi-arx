@@ -43,16 +43,16 @@ class KeyboardTeleop:
 
         # 位置
         state[0] = (
-            int(Key.up in pressed)
-            - int(Key.down in pressed)
+            int(Key.up in pressed or KeyCode.from_char("w") in pressed)
+            - int(Key.down in pressed or KeyCode.from_char("s") in pressed)
         )
         state[1] = (
-            int(Key.left in pressed)
-            - int(Key.right in pressed)
+            int(Key.left in pressed or KeyCode.from_char("a") in pressed)
+            - int(Key.right in pressed or KeyCode.from_char("d") in pressed)
         )
         state[2] = (
-            int(Key.page_up in pressed)
-            - int(Key.page_down in pressed)
+            int(Key.page_up in pressed or KeyCode.from_char("z") in pressed)
+            - int(Key.page_down in pressed or KeyCode.from_char("x") in pressed)
         )
 
         # 避开 eval_arx5.py 已使用的 Q/C/S/W/E/A
