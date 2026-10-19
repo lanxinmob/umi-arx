@@ -98,8 +98,12 @@ class ReplayBuffer:
         assert "data" in root
         assert "meta" in root
         assert "episode_ends" in root["meta"]
+        episode_ends = root["meta"]["episode_ends"]
+        # A newly created or interrupted recording may contain data arrays
+        # with zero length before the first episode is committed.
+        n_steps = int(episode_ends[-1]) if len(episode_ends) else 0
         for key, value in root["data"].items():
-            assert value.shape[0] == root["meta"]["episode_ends"][-1]
+            assert value.shape[0] == n_steps
         self.root = root
 
     # ============= create constructors ===============
