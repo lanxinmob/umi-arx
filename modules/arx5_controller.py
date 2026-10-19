@@ -23,6 +23,7 @@ class Command(enum.Enum):
     RESET_TO_HOME = 3
     ADD_WAYPOINT = 4
     UPDATE_TRAJECTORY = 5
+    JOINT_SCHEDULE_WAYPOINT = 6
 
 
 class Arx5Controller(mp.Process):
@@ -38,14 +39,19 @@ class Arx5Controller(mp.Process):
         get_max_k: Optional[int] = None,
         verbose: bool = False,
         receive_latency: float = 0.0,
+        control_mode: str = "pose",
     ):
         super().__init__(name="Arx5Controller")
         self.robot_ip = robot_ip
         self.robot_port = robot_port
+        if control_mode not in ("pose", "joint"):
+            raise ValueError(f"Unsupported ARX5 control mode: {control_mode}")
+        self.control_mode = control_mode
 
         example = {
             "cmd": Command.SERVOL.value,
             "target_pose": np.zeros((6,), dtype=np.float64),
+            "target_joint_pos": np.zeros((6,), dtype=np.float64),
             "gripper_pos": 0.0,
             "duration": 0.0,
             "target_time": 0.0,
@@ -190,6 +196,21 @@ class Arx5Controller(mp.Process):
         }
         self.input_queue.put(message)
 
+    def schedule_joint_waypoint(
+        self, joint_pos: npt.NDArray[np.float64], gripper_pos: float, target_time: float
+    ):
+        if self.control_mode != "joint":
+            raise RuntimeError("Joint waypoint sent to a pose controller")
+        joint_pos = np.asarray(joint_pos, dtype=np.float64)
+        if joint_pos.shape != (6,):
+            raise ValueError(f"Expected six joint positions, got {joint_pos.shape}")
+        self.input_queue.put({
+            "cmd": Command.JOINT_SCHEDULE_WAYPOINT.value,
+            "target_joint_pos": joint_pos,
+            "gripper_pos": float(gripper_pos),
+            "target_time": float(target_time),
+        })
+
     def add_waypoint(
         self, pose: npt.NDArray[np.float64], gripper_pos: float, target_time: float
     ):
@@ -222,6 +243,9 @@ class Arx5Controller(mp.Process):
     def run(self):
         self.robot_client = Arx5Client(self.robot_ip, self.robot_port)
         self.robot_client.reset_to_home()
+        if self.control_mode == "joint":
+            self._run_joint()
+            return
         # self.robot_client.set_gain()
         time.sleep(1)
         # self.robot_client.set_to_damping()
@@ -470,6 +494,96 @@ class Arx5Controller(mp.Process):
             self.ready_event.clear()
             print("[Arx5Controller] Setting robot to damping")
             self.robot_client.set_to_damping()
+            del self.robot_client
+            if self.verbose:
+                print("[Arx5Controller] Controller process terminated")
+
+    def _run_joint(self):
+        """Run the absolute joint-position protocol used by joint ZMQ server."""
+        np.set_printoptions(precision=3, suppress=True)
+        dt = 1 / self.frequency
+        self.robot_client.get_state()
+        curr_joints = np.asarray(self.robot_client.joint_pos, dtype=np.float64)
+        curr_gripper = float(self.robot_client.gripper_pos)
+        curr_t = time.monotonic()
+        last_waypoint_time = curr_t
+        joint_interp = PoseTrajectoryInterpolator(
+            times=np.array([curr_t]), poses=np.array([curr_joints])
+        )
+        gripper_interp = PoseTrajectoryInterpolator(
+            times=np.array([curr_t]),
+            poses=np.array([[curr_gripper, 0, 0, 0, 0, 0]]),
+        )
+        t_start = time.monotonic()
+        iter_idx = 0
+        try:
+            keep_running = True
+            while keep_running:
+                t_now = time.monotonic()
+                joint_cmd = joint_interp(t_now)
+                gripper_cmd = float(gripper_interp(t_now)[0])
+                self.robot_client.set_joint_pos(joint_cmd, gripper_cmd)
+                state = {key: getattr(self.robot_client, func_name)
+                         for key, func_name in self.receive_keys}
+                t_recv = time.time()
+                state["robot_receive_timestamp"] = t_recv
+                state["robot_timestamp"] = t_recv - self.receive_latency
+                self.ring_buffer.put(state)
+                try:
+                    commands = self.input_queue.get_k(1)
+                    n_cmd = len(commands["cmd"])
+                except Empty:
+                    commands, n_cmd = {}, 0
+                for i in range(n_cmd):
+                    command = {key: value[i] for key, value in commands.items()}
+                    cmd = command["cmd"]
+                    if cmd == Command.STOP.value:
+                        keep_running = False
+                        break
+                    if cmd == Command.JOINT_SCHEDULE_WAYPOINT.value:
+                        target_time = time.monotonic() - time.time() + float(command["target_time"])
+                        joint_interp = joint_interp.schedule_waypoint(
+                            pose=command["target_joint_pos"], time=target_time,
+                            curr_time=t_now, last_waypoint_time=last_waypoint_time,
+                        )
+                        gripper_interp = gripper_interp.schedule_waypoint(
+                            pose=[command["gripper_pos"], 0, 0, 0, 0, 0],
+                            time=target_time, curr_time=t_now,
+                            last_waypoint_time=last_waypoint_time,
+                        )
+                        last_waypoint_time = target_time
+                    elif cmd == Command.RESET_TO_HOME.value:
+                        self.robot_client.reset_to_home()
+                        self.robot_client.get_state()
+                        self.ring_buffer.clear()
+                        curr_joints = np.asarray(self.robot_client.joint_pos, dtype=np.float64)
+                        curr_gripper = float(self.robot_client.gripper_pos)
+                        curr_t = time.monotonic()
+                        last_waypoint_time = curr_t
+                        joint_interp = PoseTrajectoryInterpolator(
+                            times=np.array([curr_t]), poses=np.array([curr_joints])
+                        )
+                        gripper_interp = PoseTrajectoryInterpolator(
+                            times=np.array([curr_t]),
+                            poses=np.array([[curr_gripper, 0, 0, 0, 0, 0]]),
+                        )
+                        self.reset_success.value = True
+                    else:
+                        print(f"[Arx5Controller] Unsupported joint command {cmd}")
+                        keep_running = False
+                        break
+                precise_wait(t_start + (iter_idx + 1) * dt, time_func=time.monotonic)
+                if not self.ready_event.is_set() and self.ring_buffer.count >= 2:
+                    self.ready_event.set()
+                    if self.verbose:
+                        print("[Arx5Controller] Joint controller process is ready")
+                iter_idx += 1
+        finally:
+            self.ready_event.clear()
+            try:
+                self.robot_client.set_to_damping()
+            except Exception:
+                pass
             del self.robot_client
             if self.verbose:
                 print("[Arx5Controller] Controller process terminated")

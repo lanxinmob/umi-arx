@@ -310,6 +310,9 @@ def main(
             "robot_type": "arx5",
             "robot_ip": "127.0.0.1",
             "robot_port": robot_port,
+            # The checkpoint's absolute_joint representation must use the
+            # joint ZMQ protocol end to end.
+            "control_mode": "joint" if action_pose_repr == "absolute_joint" else "pose",
             "robot_obs_latency": 0.005,  # TODO: need to measure
             "robot_action_latency": 0.04,  # TODO: need to measure
             "height_threshold": -0.2,  # TODO: ncscseed to measure
@@ -317,6 +320,7 @@ def main(
             "sphere_center": [0, -0.06, -0.185],  # TODO: need to measure
         }
     ]
+    joint_control = all(rc.get("control_mode") == "joint" for rc in robots_config)
 
     context = zmq.Context()
     socket = context.socket(zmq.REQ)
@@ -446,7 +450,7 @@ def main(
                 f"Warming up video recording finished. Video stored to {env.video_dir.joinpath(str(0))}"
             )
 
-            assert action.shape[-1] == 10 * len(robots_config)
+            assert action.shape[-1] in (7 * len(robots_config), 10 * len(robots_config))
             action = get_real_umi_action(action, obs, action_pose_repr)
             assert action.shape[-1] == 7 * len(robots_config)
 
@@ -551,6 +555,9 @@ def main(
                                 print(f"match_episode: {match_episode}")
                         elif key_stroke == KeyCode(char="m"):
                             # Move robot to the starting pose in waiting_time seconds
+                            if joint_control:
+                                print("Dataset pose matching is unavailable in joint control mode.")
+                                continue
                             waiting_time = 5.0
                             print("starting dataset smatching")
 
@@ -591,6 +598,26 @@ def main(
                     
                     if start_policy:
                         break
+                    if joint_control:
+                        # The spacemouse emits TCP pose deltas.  A joint
+                        # checkpoint must hold the measured joint target while
+                        # the operator decides when to hand control to policy.
+                        robot_states = env.get_robot_state()
+                        action = np.concatenate([
+                            np.concatenate([
+                                np.asarray(state["ActualQ"], dtype=np.float64),
+                                [float(state["gripper_position"])],
+                            ])
+                            for state in robot_states
+                        ])
+                        env.exec_actions(
+                            actions=[action],
+                            timestamps=[t_command_target - time.monotonic() + time.time()],
+                            compensate_latency=False,
+                        )
+                        precise_wait(t_cycle_end)
+                        iter_idx += 1
+                        continue
                     precise_wait(t_sample)
                     # get teleop command
                     sm_state = sm.get_motion_state_transformed()
@@ -806,12 +833,23 @@ def main(
                             break
 
                         # print(raw_action[:, :3])
+                        action_dim = raw_action.shape[-1]
+                        current_pos = obs["robot0_eef_pos"][-1]
                         for k, raw_action_cmd in enumerate(raw_action):
                             translation = raw_action_cmd[:3]
-                            rotation = st.Rotation.from_matrix(
-                                rot6d_to_mat(raw_action_cmd[3:9])
-                            ).as_rotvec()
-                            if np.max(np.abs(translation)) / (k + 1) > 0.1:
+                            if action_pose_repr == "absolute_joint" and action_dim == 7:
+                                # Native ARX5 joint action: q1..q6 + gripper.
+                                rotation = raw_action_cmd[3:6]
+                                translation_delta = np.zeros(3)
+                            elif action_dim == 7:
+                                rotation = raw_action_cmd[3:6]
+                                translation_delta = translation - current_pos
+                            else:
+                                rotation = st.Rotation.from_matrix(
+                                    rot6d_to_mat(raw_action_cmd[3:9])
+                                ).as_rotvec()
+                                translation_delta = translation
+                            if np.max(np.abs(translation_delta)) / (k + 1) > 0.1:
                                 print(
                                     f"==============={np.mean(obs['camera0_rgb'][-1])}================"
                                 )
@@ -823,9 +861,12 @@ def main(
                         action = get_real_umi_action(raw_action, obs, action_pose_repr)
                         inference_latency_s = time.time() - s
                         raw_pos = raw_action[0, :3]
-                        raw_rot = st.Rotation.from_matrix(
-                            rot6d_to_mat(raw_action[0, 3:9])
-                        ).as_rotvec()
+                        if raw_action.shape[-1] == 7:
+                            raw_rot = raw_action[0, 3:6]
+                        else:
+                            raw_rot = st.Rotation.from_matrix(
+                                rot6d_to_mat(raw_action[0, 3:9])
+                            ).as_rotvec()
                         curr_pos = obs["robot0_eef_pos"][-1]
                         curr_rot = obs["robot0_eef_rot_axis_angle"][-1]
                         dec_pos = action[0, :3]

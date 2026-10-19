@@ -226,6 +226,7 @@ class Arx5Env:
                 robot_port=rc["robot_port"],
                 frequency=200,
                 verbose=True,
+                control_mode=rc.get("control_mode", "pose"),
             )
             robots.append(this_robot)
 
@@ -497,11 +498,18 @@ class Arx5Env:
                     )
                     r_actions = new_actions[i, 7 * robot_idx + 0 : 7 * robot_idx + 6]
                     g_actions = new_actions[i, 7 * robot_idx + 6]
-                    robot.schedule_waypoint(
-                        pose=r_actions,
-                        gripper_pos=g_actions,
-                        target_time=new_timestamps[i] - r_latency,
-                    )
+                    if rc.get("control_mode", "pose") == "joint":
+                        robot.schedule_joint_waypoint(
+                            joint_pos=r_actions,
+                            gripper_pos=g_actions,
+                            target_time=new_timestamps[i] - r_latency,
+                        )
+                    else:
+                        robot.schedule_waypoint(
+                            pose=r_actions,
+                            gripper_pos=g_actions,
+                            target_time=new_timestamps[i] - r_latency,
+                        )
         else:
             for robot_idx, (robot, rc) in enumerate(
                 zip(self.robots, self.robots_config)
@@ -509,12 +517,22 @@ class Arx5Env:
                 for i in range(len(new_actions)):
                     r_actions = new_actions[i, 7 * robot_idx + 0 : 7 * robot_idx + 6]
                     g_actions = new_actions[i, 7 * robot_idx + 6]
-                    robot.add_waypoint(
-                        pose=r_actions,
-                        gripper_pos=g_actions,
-                        target_time=new_timestamps[i],
-                    )
-                robot.update_trajectory()
+                    # Joint control uses the same scheduled protocol; the
+                    # controller performs interpolation in joint space.
+                    if rc.get("control_mode", "pose") == "joint":
+                        robot.schedule_joint_waypoint(
+                            joint_pos=r_actions,
+                            gripper_pos=g_actions,
+                            target_time=new_timestamps[i],
+                        )
+                    else:
+                        robot.add_waypoint(
+                            pose=r_actions,
+                            gripper_pos=g_actions,
+                            target_time=new_timestamps[i],
+                        )
+                if rc.get("control_mode", "pose") == "pose":
+                    robot.update_trajectory()
 
         # record actions
         if self.action_accumulator is not None:

@@ -191,6 +191,12 @@ def get_real_umi_action(
     action: np.ndarray, env_obs: Dict[str, np.ndarray], action_pose_repr: str = "abs"
 ):
 
+    # ARX5 UMI checkpoints can emit native 7D actions directly:
+    # [x, y, z, rx, ry, rz, gripper].
+    if action.shape[-1] == 7 or (
+        action_pose_repr == "absolute_joint" and action.shape[-1] % 7 == 0
+    ):
+        return action
     n_robots = int(action.shape[-1] // 10)
     env_action = list()
     for robot_idx in range(n_robots):

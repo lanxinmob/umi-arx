@@ -214,6 +214,33 @@ class Arx5Client:
         ee_pose = tcp2ee(tcp_pose_6d)
         return self.set_ee_pose(ee_pose, gripper_pos)
 
+    def set_joint_pos(
+        self,
+        joint_pos: npt.NDArray[np.float64],
+        gripper_pos: Union[float, None] = None,
+    ):
+        """Send an absolute six-joint position to the joint ZMQ server."""
+        joint_pos = np.asarray(joint_pos, dtype=np.float64)
+        if joint_pos.shape != (6,) or not np.isfinite(joint_pos).all():
+            raise ValueError(f"Invalid joint position: {joint_pos}")
+        if gripper_pos is None:
+            gripper_pos = self.gripper_pos
+        reply_msg = self.send_recv(
+            {
+                "cmd": "SET_JOINT_POS",
+                "data": {
+                    "joint_pos": joint_pos,
+                    "gripper_pos": float(gripper_pos),
+                },
+            }
+        )
+        assert reply_msg["cmd"] == "SET_JOINT_POS"
+        if not isinstance(reply_msg["data"], dict):
+            raise ValueError(f"Error: {reply_msg['data']}")
+        self.latest_state = cast(dict[str, Union[npt.NDArray[np.float64], float]],
+                                 reply_msg["data"])
+        return self.latest_state
+
     def reset_to_home(self):
         reply_msg = self.send_recv({"cmd": "RESET_TO_HOME", "data": None})
         assert reply_msg["cmd"] == "RESET_TO_HOME"
@@ -291,10 +318,16 @@ class Arx5Client:
     def tcp_command_pose(self):
         pose = self.latest_state.get("ee_cmd_pose")
         if pose is None:
-            raise RuntimeError(
-                "Robot server GET_STATE must provide ee_cmd_pose for safe startup. "
-                "Restart the updated ARX5 ZMQ server."
-            )
+            # Older ARX5 servers do not expose the commanded pose.  Starting
+            # from the measured pose is equivalent while the robot is stopped
+            # and keeps the client compatible with those servers.
+            pose = self.latest_state.get("ee_pose")
+            if pose is None:
+                raise RuntimeError(
+                    "Robot server GET_STATE has neither ee_cmd_pose nor ee_pose."
+                )
+            print("Warning: ee_cmd_pose missing; using measured ee_pose for startup.",
+                  flush=True)
         pose = np.asarray(pose, dtype=np.float64)
         if pose.shape != (6,) or not np.isfinite(pose).all():
             raise ValueError(f"Invalid ee_cmd_pose from robot server: {pose}")
@@ -303,11 +336,10 @@ class Arx5Client:
     @property
     def gripper_command_pos(self):
         position = self.latest_state.get("gripper_cmd_pos")
+        if position is None:
+            position = self.latest_state.get("gripper_pos")
         if position is None or not np.isfinite(position):
-            raise RuntimeError(
-                "Robot server GET_STATE must provide a finite gripper_cmd_pos. "
-                "Restart the updated ARX5 ZMQ server."
-            )
+            raise RuntimeError("Robot server returned no finite gripper position.")
         return float(position)
 
     def __del__(self):
