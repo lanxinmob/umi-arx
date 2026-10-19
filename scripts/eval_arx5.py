@@ -599,17 +599,25 @@ def main(
                     if start_policy:
                         break
                     if joint_control:
-                        # The spacemouse emits TCP pose deltas.  A joint
-                        # checkpoint must hold the measured joint target while
-                        # the operator decides when to hand control to policy.
+                        # In joint mode, map the six teleop axes to small joint
+                        # increments.  The pose protocol's Cartesian IK path
+                        # is intentionally not used here.
+                        precise_wait(t_sample)
+                        sm_state = sm.get_motion_state_transformed()
                         robot_states = env.get_robot_state()
-                        action = np.concatenate([
-                            np.concatenate([
-                                np.asarray(state["ActualQ"], dtype=np.float64),
-                                [float(state["gripper_position"])],
-                            ])
-                            for state in robot_states
-                        ])
+                        action_parts = []
+                        for state in robot_states:
+                            joints = np.asarray(state["ActualQ"], dtype=np.float64).copy()
+                            joints += np.asarray(sm_state, dtype=np.float64) * (0.5 / frequency)
+                            gripper = float(state["gripper_position"])
+                            if sm.is_button_pressed(0):
+                                gripper -= gripper_speed / frequency
+                            elif sm.is_button_pressed(1):
+                                gripper += gripper_speed / frequency
+                            action_parts.append(np.concatenate([
+                                joints, [np.clip(gripper, 0.0, max_gripper_width)]
+                            ]))
+                        action = np.concatenate(action_parts)
                         env.exec_actions(
                             actions=[action],
                             timestamps=[t_command_target - time.monotonic() + time.time()],
