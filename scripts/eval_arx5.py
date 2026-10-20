@@ -972,7 +972,13 @@ def main(
                             # compensate_latency=True
                             dynamic_latency=True,
                         )
-                        print(f"Submitted {len(this_target_poses)} steps of actions.")
+                        if joint_control:
+                            print(
+                                f"Submitted {len(this_target_poses)} timed joint waypoints "
+                                "as one SDK trajectory."
+                            )
+                        else:
+                            print(f"Submitted {len(this_target_poses)} steps of actions.")
 
                         # visualize
                         episode_id = env.replay_buffer.n_episodes
