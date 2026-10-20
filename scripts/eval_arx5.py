@@ -68,11 +68,12 @@ OmegaConf.register_new_resolver("eval", eval, replace=True)
 
 PREVIEW_MAX_SIZE = (960, 720)
 JOINT_ACTION_RESAMPLE_DT = 0.01
-# Keep the first predicted joint waypoint in the future.  The observation
-# timestamp is intentionally older than the wall clock by camera and policy
-# latency; submitting it unchanged would drop the initial waypoints and make
-# the SDK jump to a later joint target almost immediately.
-JOINT_ACTION_MIN_LEAD_STEPS = 1
+# Keep the first predicted joint waypoint well in the future.  The observation
+# timestamp is older than the wall clock by camera and policy latency; a single
+# 200 ms lead leaves almost no room for a 180 ms inference and makes the SDK
+# start the new chunk with a sharp transition.  Two action steps match the
+# 0.4 s transition used by the Cartesian path.
+JOINT_ACTION_MIN_LEAD_STEPS = 2
 
 
 def fit_preview_image(image, max_size=PREVIEW_MAX_SIZE):
