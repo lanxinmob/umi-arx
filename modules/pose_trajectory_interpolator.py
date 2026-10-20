@@ -22,13 +22,20 @@ def pose_distance(start_pose, end_pose):
 
 
 class PoseTrajectoryInterpolator:
-    def __init__(self, times: np.ndarray, poses: np.ndarray):
+    def __init__(self, times: np.ndarray, poses: np.ndarray, linear: bool = False):
+        """Interpolate a 6D pose or a 6D numeric vector.
+
+        ``linear=False`` keeps the original position/Slerp behavior for EEF
+        poses.  Joint angles are numeric coordinates, so callers must set
+        ``linear=True`` to interpolate all six dimensions independently.
+        """
         assert len(times) >= 1
         assert len(poses) == len(times)
         if not isinstance(times, np.ndarray):
             times = np.array(times)
         if not isinstance(poses, np.ndarray):
             poses = np.array(poses)
+        self.linear = linear
 
         if len(times) == 1:
             # special treatment for single step interpolation
@@ -39,16 +46,23 @@ class PoseTrajectoryInterpolator:
             self.single_step = False
             assert np.all(times[1:] >= times[:-1])
 
-            pos = poses[:, :3]
-            rot = st.Rotation.from_rotvec(poses[:, 3:])
+            if self.linear:
+                self.linear_interp = si.interp1d(
+                    times, poses, axis=0, assume_sorted=True
+                )
+            else:
+                pos = poses[:, :3]
+                rot = st.Rotation.from_rotvec(poses[:, 3:])
 
-            self.pos_interp = si.interp1d(times, pos, axis=0, assume_sorted=True)
-            self.rot_interp = st.Slerp(times, rot)
+                self.pos_interp = si.interp1d(times, pos, axis=0, assume_sorted=True)
+                self.rot_interp = st.Slerp(times, rot)
 
     @property
     def times(self) -> np.ndarray:
         if self.single_step:
             return self._times
+        elif self.linear:
+            return self.linear_interp.x
         else:
             return self.pos_interp.x
 
@@ -56,6 +70,8 @@ class PoseTrajectoryInterpolator:
     def poses(self) -> np.ndarray:
         if self.single_step:
             return self._poses
+        if self.linear:
+            return self.linear_interp.y
         else:
             n = len(self.times)
             poses = np.zeros((n, 6))
@@ -73,7 +89,9 @@ class PoseTrajectoryInterpolator:
         all_times = np.unique(all_times)
         # interpolate
         all_poses = self(all_times)
-        return PoseTrajectoryInterpolator(times=all_times, poses=all_poses)
+        return PoseTrajectoryInterpolator(
+            times=all_times, poses=all_poses, linear=self.linear
+        )
 
     def drive_to_waypoint(
         self, pose, time, curr_time, max_pos_speed=np.inf, max_rot_speed=np.inf
@@ -83,11 +101,15 @@ class PoseTrajectoryInterpolator:
         time = max(time, curr_time)
 
         curr_pose = self(curr_time)
-        pos_dist, rot_dist = pose_distance(curr_pose, pose)
-        pos_min_duration = pos_dist / max_pos_speed
-        rot_min_duration = rot_dist / max_rot_speed
         duration = time - curr_time
-        duration = max(duration, max(pos_min_duration, rot_min_duration))
+        if self.linear:
+            distance = np.linalg.norm(np.asarray(pose) - curr_pose)
+            duration = max(duration, distance / max_pos_speed)
+        else:
+            pos_dist, rot_dist = pose_distance(curr_pose, pose)
+            pos_min_duration = pos_dist / max_pos_speed
+            rot_min_duration = rot_dist / max_rot_speed
+            duration = max(duration, max(pos_min_duration, rot_min_duration))
         assert duration >= 0
         last_waypoint_time = curr_time + duration
 
@@ -97,7 +119,7 @@ class PoseTrajectoryInterpolator:
         poses = np.append(trimmed_interp.poses, [pose], axis=0)
 
         # create new interpolator
-        final_interp = PoseTrajectoryInterpolator(times, poses)
+        final_interp = PoseTrajectoryInterpolator(times, poses, linear=self.linear)
         return final_interp
 
     def schedule_waypoint(
@@ -169,10 +191,14 @@ class PoseTrajectoryInterpolator:
         # determine speed
         duration = time - end_time
         end_pose = trimmed_interp(end_time)
-        pos_dist, rot_dist = pose_distance(pose, end_pose)
-        pos_min_duration = pos_dist / max_pos_speed
-        rot_min_duration = rot_dist / max_rot_speed
-        duration = max(duration, max(pos_min_duration, rot_min_duration))
+        if self.linear:
+            distance = np.linalg.norm(np.asarray(pose) - end_pose)
+            duration = max(duration, distance / max_pos_speed)
+        else:
+            pos_dist, rot_dist = pose_distance(pose, end_pose)
+            pos_min_duration = pos_dist / max_pos_speed
+            rot_min_duration = rot_dist / max_rot_speed
+            duration = max(duration, max(pos_min_duration, rot_min_duration))
         assert duration >= 0
         last_waypoint_time = end_time + duration
 
@@ -181,7 +207,7 @@ class PoseTrajectoryInterpolator:
         poses = np.append(trimmed_interp.poses, [pose], axis=0)
 
         # create new interpolator
-        final_interp = PoseTrajectoryInterpolator(times, poses)
+        final_interp = PoseTrajectoryInterpolator(times, poses, linear=self.linear)
         return final_interp
 
     def __call__(self, t: Union[float, np.ndarray]) -> np.ndarray:
@@ -196,6 +222,11 @@ class PoseTrajectoryInterpolator:
         pose = np.zeros((len(t), 6))
         if self.single_step:
             pose[:] = self._poses[0]
+        elif self.linear:
+            start_time = self.times[0]
+            end_time = self.times[-1]
+            t = np.clip(t, start_time, end_time)
+            pose = self.linear_interp(t)
         else:
             start_time = self.times[0]
             end_time = self.times[-1]

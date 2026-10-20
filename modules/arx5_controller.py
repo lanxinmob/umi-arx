@@ -540,11 +540,12 @@ class Arx5Controller(mp.Process):
         curr_t = time.monotonic()
         last_waypoint_time = curr_t
         joint_interp = PoseTrajectoryInterpolator(
-            times=np.array([curr_t]), poses=np.array([curr_joints])
+            times=np.array([curr_t]), poses=np.array([curr_joints]), linear=True
         )
         gripper_interp = PoseTrajectoryInterpolator(
             times=np.array([curr_t]),
             poses=np.array([[curr_gripper, 0, 0, 0, 0, 0]]),
+            linear=True,
         )
         t_start = time.monotonic()
         iter_idx = 0
@@ -590,12 +591,15 @@ class Arx5Controller(mp.Process):
                         curr_t = time.monotonic()
                         last_waypoint_time = curr_t
                         joint_interp = PoseTrajectoryInterpolator(
-                            times=np.array([curr_t]), poses=np.array([curr_joints])
+                            times=np.array([curr_t]),
+                            poses=np.array([curr_joints]),
+                            linear=True,
                         )
                         self.mode_state.value = 0
                         gripper_interp = PoseTrajectoryInterpolator(
                             times=np.array([curr_t]),
                             poses=np.array([[curr_gripper, 0, 0, 0, 0, 0]]),
+                            linear=True,
                         )
                     elif cmd == Command.JOINT_SCHEDULE_WAYPOINT.value:
                         if manual_drag:
@@ -620,11 +624,14 @@ class Arx5Controller(mp.Process):
                         curr_t = time.monotonic()
                         last_waypoint_time = curr_t
                         joint_interp = PoseTrajectoryInterpolator(
-                            times=np.array([curr_t]), poses=np.array([curr_joints])
+                            times=np.array([curr_t]),
+                            poses=np.array([curr_joints]),
+                            linear=True,
                         )
                         gripper_interp = PoseTrajectoryInterpolator(
                             times=np.array([curr_t]),
                             poses=np.array([[curr_gripper, 0, 0, 0, 0, 0]]),
+                            linear=True,
                         )
                         self.reset_success.value = True
                     else:
