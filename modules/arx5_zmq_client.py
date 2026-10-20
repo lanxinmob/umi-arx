@@ -4,6 +4,7 @@ from enum import IntEnum, auto
 import numpy.typing as npt
 import numpy as np
 import sys
+import time
 import traceback
 
 
@@ -244,6 +245,59 @@ class Arx5Client:
             raise ValueError(f"Error: {reply_msg['data']}")
         self.latest_state = cast(dict[str, Union[npt.NDArray[np.float64], float]],
                                  reply_msg["data"])
+        return self.latest_state
+
+    def set_joint_traj(
+        self,
+        joint_pos: npt.NDArray[np.float64],
+        gripper_pos: npt.NDArray[np.float64],
+        target_times: npt.NDArray[np.float64],
+    ):
+        """Replace the robot's future joint trajectory in one request.
+
+        ``target_times`` uses the Unix wall clock, matching ``Arx5Env`` action
+        timestamps.  The server receives the equivalent relative offsets and
+        lets the SDK interpolate the complete trajectory at its controller
+        rate.
+        """
+        joint_pos = np.asarray(joint_pos, dtype=np.float64)
+        gripper_pos = np.asarray(gripper_pos, dtype=np.float64)
+        target_times = np.asarray(target_times, dtype=np.float64)
+        if joint_pos.ndim != 2 or joint_pos.shape[1] != 6:
+            raise ValueError(f"Invalid joint trajectory shape: {joint_pos.shape}")
+        if gripper_pos.shape != (joint_pos.shape[0],):
+            raise ValueError(f"Invalid gripper trajectory shape: {gripper_pos.shape}")
+        if target_times.shape != gripper_pos.shape:
+            raise ValueError(f"Invalid target time shape: {target_times.shape}")
+        if joint_pos.shape[0] == 0:
+            raise ValueError("Joint trajectory must contain at least one waypoint")
+        if (
+            not np.isfinite(joint_pos).all()
+            or not np.isfinite(gripper_pos).all()
+            or not np.isfinite(target_times).all()
+        ):
+            raise ValueError("Joint trajectory values must be finite")
+        if np.any(np.diff(target_times) <= 0):
+            raise ValueError("Joint trajectory times must be strictly ascending")
+
+        gripper_pos = np.clip(gripper_pos, 0.0, GRIPPER_WIDTH)
+        time_from_now = target_times - time.time()
+        reply_msg = self.send_recv(
+            {
+                "cmd": "SET_JOINT_TRAJ",
+                "data": {
+                    "joint_pos": joint_pos,
+                    "gripper_pos": gripper_pos,
+                    "time_from_now": time_from_now,
+                },
+            }
+        )
+        assert reply_msg["cmd"] == "SET_JOINT_TRAJ"
+        if not isinstance(reply_msg["data"], dict):
+            raise ValueError(f"Error: {reply_msg['data']}")
+        self.latest_state = cast(
+            dict[str, Union[npt.NDArray[np.float64], float]], reply_msg["data"]
+        )
         return self.latest_state
 
     def reset_to_home(self):

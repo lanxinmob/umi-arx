@@ -485,54 +485,61 @@ class Arx5Env:
 
         assert new_actions.shape[1] // len(self.robots) == 7
         assert new_actions.shape[1] % len(self.robots) == 0
+        if len(new_actions) == 0:
+            return
 
         # schedule waypoints
 
         if not dynamic_latency:
-            for i in range(len(new_actions)):
-                for robot_idx, (robot, rc) in enumerate(
-                    zip(self.robots, self.robots_config)
-                ):
+            for robot_idx, (robot, rc) in enumerate(
+                zip(self.robots, self.robots_config)
+            ):
+                if rc.get("control_mode", "pose") == "joint":
+                    r_actions = new_actions[
+                        :, 7 * robot_idx + 0 : 7 * robot_idx + 6
+                    ]
+                    g_actions = new_actions[:, 7 * robot_idx + 6]
+                    robot.set_joint_trajectory(
+                        joint_pos=r_actions,
+                        gripper_pos=g_actions,
+                        target_times=new_timestamps,
+                    )
+                    continue
+                for i in range(len(new_actions)):
                     r_latency = (
                         rc["robot_action_latency"] if compensate_latency else 0.0
                     )
                     r_actions = new_actions[i, 7 * robot_idx + 0 : 7 * robot_idx + 6]
                     g_actions = new_actions[i, 7 * robot_idx + 6]
-                    if rc.get("control_mode", "pose") == "joint":
-                        robot.schedule_joint_waypoint(
-                            joint_pos=r_actions,
-                            gripper_pos=g_actions,
-                            target_time=new_timestamps[i] - r_latency,
-                        )
-                    else:
-                        robot.schedule_waypoint(
-                            pose=r_actions,
-                            gripper_pos=g_actions,
-                            target_time=new_timestamps[i] - r_latency,
-                        )
+                    robot.schedule_waypoint(
+                        pose=r_actions,
+                        gripper_pos=g_actions,
+                        target_time=new_timestamps[i] - r_latency,
+                    )
         else:
             for robot_idx, (robot, rc) in enumerate(
                 zip(self.robots, self.robots_config)
             ):
+                if rc.get("control_mode", "pose") == "joint":
+                    r_actions = new_actions[
+                        :, 7 * robot_idx + 0 : 7 * robot_idx + 6
+                    ]
+                    g_actions = new_actions[:, 7 * robot_idx + 6]
+                    robot.set_joint_trajectory(
+                        joint_pos=r_actions,
+                        gripper_pos=g_actions,
+                        target_times=new_timestamps,
+                    )
+                    continue
                 for i in range(len(new_actions)):
                     r_actions = new_actions[i, 7 * robot_idx + 0 : 7 * robot_idx + 6]
                     g_actions = new_actions[i, 7 * robot_idx + 6]
-                    # Joint control uses the same scheduled protocol; the
-                    # controller performs interpolation in joint space.
-                    if rc.get("control_mode", "pose") == "joint":
-                        robot.schedule_joint_waypoint(
-                            joint_pos=r_actions,
-                            gripper_pos=g_actions,
-                            target_time=new_timestamps[i],
-                        )
-                    else:
-                        robot.add_waypoint(
-                            pose=r_actions,
-                            gripper_pos=g_actions,
-                            target_time=new_timestamps[i],
-                        )
-                if rc.get("control_mode", "pose") == "pose":
-                    robot.update_trajectory()
+                    robot.add_waypoint(
+                        pose=r_actions,
+                        gripper_pos=g_actions,
+                        target_time=new_timestamps[i],
+                    )
+                robot.update_trajectory()
 
         # record actions
         if self.action_accumulator is not None:
