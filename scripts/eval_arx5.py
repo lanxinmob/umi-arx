@@ -459,6 +459,10 @@ def main(
                 last_control_is_human = True
                 # ========= human control loop ==========
                 print("Human in control!")
+                if joint_control:
+                    for robot in env.robots:
+                        robot.drag()
+                    print("Joint drag mode: move the arm by hand; press 'c' to hold and start policy.")
                 robot_states = env.get_robot_state()
                 target_pose = np.stack([rs["ActualTCPPose"] for rs in robot_states])
 
@@ -540,6 +544,9 @@ def main(
                         elif key_stroke == KeyCode(char="c"):
                             # Exit human control loop
                             # hand control over to the policy
+                            if joint_control:
+                                for robot in env.robots:
+                                    robot.hold()
                             start_policy = True
                         elif key_stroke == KeyCode(char="e"):
                             # Next episode
@@ -599,36 +606,6 @@ def main(
                     if start_policy:
                         break
                     if joint_control:
-                        # In joint mode, map the six teleop axes to small joint
-                        # increments.  The pose protocol's Cartesian IK path
-                        # is intentionally not used here.
-                        precise_wait(t_sample)
-                        sm_state = sm.get_motion_state_transformed()
-                        if np.any(np.abs(sm_state) > 1e-9):
-                            print(
-                                f"Joint teleop input: {sm_state}; "
-                                f"delta={np.asarray(sm_state) * (0.5 / frequency)}",
-                                flush=True,
-                            )
-                        robot_states = env.get_robot_state()
-                        action_parts = []
-                        for state in robot_states:
-                            joints = np.asarray(state["ActualQ"], dtype=np.float64).copy()
-                            joints += np.asarray(sm_state, dtype=np.float64) * (0.5 / frequency)
-                            gripper = float(state["gripper_position"])
-                            if sm.is_button_pressed(0):
-                                gripper -= gripper_speed / frequency
-                            elif sm.is_button_pressed(1):
-                                gripper += gripper_speed / frequency
-                            action_parts.append(np.concatenate([
-                                joints, [np.clip(gripper, 0.0, max_gripper_width)]
-                            ]))
-                        action = np.concatenate(action_parts)
-                        env.exec_actions(
-                            actions=[action],
-                            timestamps=[t_command_target - time.monotonic() + time.time()],
-                            compensate_latency=False,
-                        )
                         precise_wait(t_cycle_end)
                         iter_idx += 1
                         continue

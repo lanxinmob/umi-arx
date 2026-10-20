@@ -260,6 +260,25 @@ class Arx5Client:
             raise ValueError(f"Error: {reply_msg['data']}")
         self.get_state()
 
+    def _set_joint_mode(self, command: str):
+        if command not in ("DRAG", "HOLD"):
+            raise ValueError(f"Unsupported joint mode command: {command}")
+        reply_msg = self.send_recv({"cmd": command, "data": None})
+        if reply_msg["cmd"] != command:
+            raise ValueError(f"Unexpected response to {command}: {reply_msg}")
+        if not isinstance(reply_msg["data"], dict):
+            raise ValueError(f"Error: {reply_msg['data']}")
+        self.latest_state = cast(
+            dict[str, Union[npt.NDArray[np.float64], float]], reply_msg["data"]
+        )
+        return self.latest_state
+
+    def drag(self):
+        return self._set_joint_mode("DRAG")
+
+    def hold(self):
+        return self._set_joint_mode("HOLD")
+
     def get_gain(self):
         reply_msg = self.send_recv({"cmd": "GET_GAIN", "data": None})
         assert reply_msg["cmd"] == "GET_GAIN"

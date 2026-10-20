@@ -24,6 +24,8 @@ class Command(enum.Enum):
     ADD_WAYPOINT = 4
     UPDATE_TRAJECTORY = 5
     JOINT_SCHEDULE_WAYPOINT = 6
+    JOINT_DRAG = 7
+    JOINT_HOLD = 8
 
 
 class Arx5Controller(mp.Process):
@@ -210,6 +212,16 @@ class Arx5Controller(mp.Process):
             "gripper_pos": float(gripper_pos),
             "target_time": float(target_time),
         })
+
+    def drag(self):
+        if self.control_mode != "joint":
+            raise RuntimeError("Drag mode is only available for a joint controller")
+        self.input_queue.put({"cmd": Command.JOINT_DRAG.value})
+
+    def hold(self):
+        if self.control_mode != "joint":
+            raise RuntimeError("Hold mode is only available for a joint controller")
+        self.input_queue.put({"cmd": Command.JOINT_HOLD.value})
 
     def add_waypoint(
         self, pose: npt.NDArray[np.float64], gripper_pos: float, target_time: float
@@ -516,13 +528,17 @@ class Arx5Controller(mp.Process):
         )
         t_start = time.monotonic()
         iter_idx = 0
+        manual_drag = False
         try:
             keep_running = True
             while keep_running:
                 t_now = time.monotonic()
-                joint_cmd = joint_interp(t_now)
-                gripper_cmd = float(gripper_interp(t_now)[0])
-                self.robot_client.set_joint_pos(joint_cmd, gripper_cmd)
+                if not manual_drag:
+                    joint_cmd = joint_interp(t_now)
+                    gripper_cmd = float(gripper_interp(t_now)[0])
+                    self.robot_client.set_joint_pos(joint_cmd, gripper_cmd)
+                else:
+                    self.robot_client.get_state()
                 state = {key: getattr(self.robot_client, func_name)
                          for key, func_name in self.receive_keys}
                 t_recv = time.time()
@@ -540,7 +556,28 @@ class Arx5Controller(mp.Process):
                     if cmd == Command.STOP.value:
                         keep_running = False
                         break
-                    if cmd == Command.JOINT_SCHEDULE_WAYPOINT.value:
+                    if cmd == Command.JOINT_DRAG.value:
+                        self.robot_client.drag()
+                        manual_drag = True
+                        self.waypoint_buffer = []
+                    elif cmd == Command.JOINT_HOLD.value:
+                        self.robot_client.hold()
+                        manual_drag = False
+                        self.robot_client.get_state()
+                        curr_joints = np.asarray(self.robot_client.joint_pos, dtype=np.float64)
+                        curr_gripper = float(self.robot_client.gripper_pos)
+                        curr_t = time.monotonic()
+                        last_waypoint_time = curr_t
+                        joint_interp = PoseTrajectoryInterpolator(
+                            times=np.array([curr_t]), poses=np.array([curr_joints])
+                        )
+                        gripper_interp = PoseTrajectoryInterpolator(
+                            times=np.array([curr_t]),
+                            poses=np.array([[curr_gripper, 0, 0, 0, 0, 0]]),
+                        )
+                    elif cmd == Command.JOINT_SCHEDULE_WAYPOINT.value:
+                        if manual_drag:
+                            continue
                         target_time = time.monotonic() - time.time() + float(command["target_time"])
                         joint_interp = joint_interp.schedule_waypoint(
                             pose=command["target_joint_pos"], time=target_time,
