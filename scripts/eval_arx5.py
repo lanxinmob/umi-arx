@@ -50,6 +50,7 @@ from utils.real_inference_util import (
     get_real_obs_resolution,
     get_real_umi_obs_dict,
     get_real_umi_action,
+    resample_timed_action_chunk,
 )
 from peripherals.spacemouse_shared_memory import Spacemouse
 from peripherals.gamepad_teleop import GamepadTeleop
@@ -66,6 +67,7 @@ OmegaConf.register_new_resolver("eval", eval, replace=True)
 
 
 PREVIEW_MAX_SIZE = (960, 720)
+JOINT_ACTION_RESAMPLE_DT = 0.01
 
 
 def fit_preview_image(image, max_size=PREVIEW_MAX_SIZE):
@@ -722,6 +724,9 @@ def main(
                             "frequency_hz": frequency,
                             "steps_per_inference": steps_per_inference,
                             "chunk_blend": chunk_blend,
+                            "joint_action_resample_hz": (
+                                1.0 / JOINT_ACTION_RESAMPLE_DT
+                            ),
                         },
                     )
                     episode_status = "running"
@@ -868,14 +873,28 @@ def main(
                             np.arange(len(action), dtype=np.float64)
                         ) * dt + obs_timestamps[-1]
                         if action_pose_repr == "absolute_joint":
+                            action, action_timestamps = resample_timed_action_chunk(
+                                action=action,
+                                timestamps=action_timestamps,
+                                target_dt=JOINT_ACTION_RESAMPLE_DT,
+                            )
                             action = blend_overlapping_action_chunk(
                                 action=action,
                                 timestamps=action_timestamps,
                                 previous_action=previous_policy_action,
                                 previous_timestamps=previous_action_timestamps,
-                                dt=dt,
+                                dt=JOINT_ACTION_RESAMPLE_DT,
                                 blend=chunk_blend,
-                                blend_steps=steps_per_inference,
+                                blend_steps=max(
+                                    1,
+                                    int(
+                                        round(
+                                            steps_per_inference
+                                            * dt
+                                            / JOINT_ACTION_RESAMPLE_DT
+                                        )
+                                    ),
+                                ),
                             )
                         previous_policy_action = action.copy()
                         previous_action_timestamps = action_timestamps.copy()

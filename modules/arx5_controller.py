@@ -29,7 +29,8 @@ class Command(enum.Enum):
     JOINT_SET_TRAJECTORY = 9
 
 
-MAX_JOINT_WAYPOINTS = 128
+# A 16-step, 5 Hz policy horizon becomes roughly 300 points at 100 Hz.
+MAX_JOINT_WAYPOINTS = 512
 
 
 class Arx5Controller(mp.Process):

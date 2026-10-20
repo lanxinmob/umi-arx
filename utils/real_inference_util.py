@@ -244,10 +244,11 @@ def blend_overlapping_action_chunk(
 ) -> np.ndarray:
     """Blend the near-term overlap between two absolute action chunks.
 
-    Replanning replaces a future trajectory with a new prediction. Averaging
-    the first few matching timestamps keeps that replacement continuous while
-    leaving the farther part of the new horizon untouched. ``blend`` is the
-    weight of the previous chunk and is faded to zero across ``blend_steps``.
+    Replanning replaces a future trajectory with a new prediction. The old
+    chunk is linearly sampled at each new timestamp, so the blend remains
+    effective after either chunk has been resampled to a denser control grid.
+    ``blend`` is the weight of the previous chunk and is faded to zero across
+    ``blend_steps``.
     """
     action = np.asarray(action)
     if (
@@ -265,13 +266,60 @@ def blend_overlapping_action_chunk(
     if dt <= 0 or not np.isfinite(dt):
         raise ValueError("dt must be positive and finite")
     blend_steps = max(1, min(int(blend_steps), len(action)))
-    tolerance = max(0.25 * dt, 1e-3)
     result = action.copy()
     for index in range(blend_steps):
-        nearest = int(np.argmin(np.abs(previous_timestamps - timestamps[index])))
-        if abs(float(previous_timestamps[nearest] - timestamps[index])) > tolerance:
+        timestamp = float(timestamps[index])
+        if timestamp < previous_timestamps[0] or timestamp > previous_timestamps[-1]:
             continue
+        previous_at_timestamp = np.asarray(
+            [
+                np.interp(timestamp, previous_timestamps, previous_action[:, dim])
+                for dim in range(previous_action.shape[1])
+            ],
+            dtype=action.dtype,
+        )
         fade = 1.0 - index / blend_steps
         weight = float(np.clip(blend * fade, 0.0, 1.0))
-        result[index] = (1.0 - weight) * result[index] + weight * previous_action[nearest]
+        result[index] = (1.0 - weight) * result[index] + weight * previous_at_timestamp
     return result
+
+
+def resample_timed_action_chunk(
+    action: np.ndarray,
+    timestamps: np.ndarray,
+    target_dt: float,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Linearly resample a timed action chunk onto a fixed control grid."""
+    action = np.asarray(action)
+    timestamps = np.asarray(timestamps, dtype=np.float64)
+    if action.ndim != 2 or timestamps.ndim != 1 or len(action) != len(timestamps):
+        raise ValueError("Action and timestamps must have shapes (N, D) and (N,)")
+    if len(action) == 0:
+        raise ValueError("Action chunk must contain at least one point")
+    if not np.isfinite(action).all() or not np.isfinite(timestamps).all():
+        raise ValueError("Action and timestamps must be finite")
+    if target_dt <= 0 or not np.isfinite(target_dt):
+        raise ValueError("target_dt must be positive and finite")
+    if len(timestamps) > 1 and np.any(np.diff(timestamps) <= 0):
+        raise ValueError("Action timestamps must be strictly ascending")
+    if len(action) == 1:
+        return action.copy(), timestamps.copy()
+
+    start = float(timestamps[0])
+    end = float(timestamps[-1])
+    duration = end - start
+    interval_count = max(1, int(np.ceil(duration / target_dt - 1e-12)))
+    resampled_timestamps = start + np.arange(interval_count + 1, dtype=np.float64) * target_dt
+    if resampled_timestamps[-1] > end:
+        resampled_timestamps[-1] = end
+    elif resampled_timestamps[-1] < end:
+        resampled_timestamps = np.append(resampled_timestamps, end)
+
+    resampled_action = np.stack(
+        [
+            np.interp(resampled_timestamps, timestamps, action[:, dim])
+            for dim in range(action.shape[1])
+        ],
+        axis=1,
+    ).astype(action.dtype, copy=False)
+    return resampled_action, resampled_timestamps
