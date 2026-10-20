@@ -37,6 +37,10 @@ cd /home/hjadmin/projects/arx5-sdk/python
 python communication/zmq_joint_server.py X5_umi can0 --port 8765
 ```
 
+Do not use `communication/zmq_server.py` for this checkpoint; that entry point
+serves Cartesian `SET_EE_POSE` requests and does not implement the joint
+trajectory protocol.
+
 Run the DGM policy service on port 8766, then start the client from this
 repository. The client uses a 5 Hz action clock and submits each future joint
 chunk as one `SET_JOINT_TRAJ` request. The SDK keeps that trajectory and
