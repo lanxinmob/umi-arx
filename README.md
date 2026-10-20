@@ -6,9 +6,12 @@ read its live commissioning limits before enabling hardware.
 
 ## Robot State Startup Errors
 
-Start the updated `python communication/zmq_server_agent_safe.py X5_umi can0`
-in the ARX5 SDK environment before starting `scripts/eval_arx5.py`. The client waits for a live
-controller and at least two robot state samples before reporting readiness.
+For guarded Cartesian checkpoints, start the updated
+`python communication/zmq_server_agent_safe.py X5_umi can0` in the ARX5 SDK
+environment before starting `scripts/eval_arx5.py`. For `absolute_joint`
+checkpoints, use the joint server documented below. In either mode the client
+waits for a live controller and at least two robot state samples before
+reporting readiness.
 On reset, the client initializes its hold target from `ee_cmd_pose` and
 `gripper_cmd_pos` in `GET_STATE`, the same reset command pose used by the
 guarded server's 2 mm command limit. `ee_pose` remains the measured observation.
