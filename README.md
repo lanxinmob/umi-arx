@@ -53,3 +53,5 @@ feedback at 200 Hz.
 With the default `--steps_per_inference 4`, policy replanning is 1.25 Hz (every
 0.8 s), while each response contains a 16-step horizon. Overlapping chunks are
 blended by default; use `--chunk-blend 0` to disable that boundary smoothing.
+The joint server ramps HOLD gains for 0.3 s after `C`; keep the arm still until
+the `HOLD confirmed` message appears.
