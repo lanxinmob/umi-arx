@@ -37,6 +37,13 @@ cd /home/hjadmin/projects/arx5-sdk/python
 python communication/zmq_joint_server.py X5_umi can0 --port 8765
 ```
 
+The joint server enters gravity-compensated drag mode when `eval_arx5.py`
+returns control with `s`. If the released arm rises or leans backward, restart
+the server with a lower feedforward multiplier, for example
+`--gravity-scale 0.85`; keep the arm supported while tuning this value. The
+server clears the active policy trajectory before switching to drag, so episode
+recording cannot continue to drive the arm during the handoff.
+
 Do not use `communication/zmq_server.py` for this checkpoint; that entry point
 serves Cartesian `SET_EE_POSE` requests and does not implement the joint
 trajectory protocol.

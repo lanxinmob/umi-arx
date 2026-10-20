@@ -1062,6 +1062,19 @@ def main(
                             episode_status = (
                                 "max_duration" if t_since_start > max_duration else "manual_stop"
                             )
+                            # Stop accepting the current policy trajectory before
+                            # finalizing recordings.  ``end_episode`` can spend
+                            # several hundred milliseconds flushing camera and
+                            # replay data; leaving the SDK trajectory active
+                            # during that interval makes ``s`` appear to move the
+                            # arm after control has already been handed back.
+                            if joint_control:
+                                print(
+                                    "Stopping policy trajectory; entering joint drag mode.",
+                                    flush=True,
+                                )
+                                for robot in env.robots:
+                                    robot.drag()
                             env.end_episode()
                             break
 

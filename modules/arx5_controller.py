@@ -637,10 +637,19 @@ class Arx5Controller(mp.Process):
                         keep_running = False
                         break
                     if cmd == Command.JOINT_DRAG.value:
+                        # Discard commands queued before the mode switch.  In
+                        # particular, ``s`` can arrive while a policy chunk is
+                        # still waiting in this queue; replaying that chunk
+                        # after DRAG would immediately take ownership back.
+                        self.input_queue.clear()
                         self.robot_client.drag()
                         manual_drag = True
                         self.mode_state.value = 1
                     elif cmd == Command.JOINT_HOLD.value:
+                        # A HOLD transition starts a new policy episode.  Do
+                        # not let a stale trajectory submitted before ``c``
+                        # become active after the mode flag is cleared.
+                        self.input_queue.clear()
                         self.robot_client.hold()
                         manual_drag = False
                         self.mode_state.value = 0
