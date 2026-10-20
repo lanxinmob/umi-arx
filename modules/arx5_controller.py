@@ -326,10 +326,10 @@ class Arx5Controller(mp.Process):
     # ========= main loop in process ============
     def run(self):
         self.robot_client = Arx5Client(self.robot_ip, self.robot_port)
-        self.robot_client.reset_to_home()
         if self.control_mode == "joint":
             self._run_joint()
             return
+        self.robot_client.reset_to_home()
         # self.robot_client.set_gain()
         time.sleep(1)
         # self.robot_client.set_to_damping()
@@ -591,6 +591,15 @@ class Arx5Controller(mp.Process):
         """
         np.set_printoptions(precision=3, suppress=True)
         dt = 1 / self.frequency
+        self.robot_client.get_state()
+        missing = {"armed", "mode"}.difference(self.robot_client.latest_state)
+        if missing:
+            raise RuntimeError(
+                "Joint control requires communication/zmq_joint_server.py; "
+                f"GET_STATE is missing {sorted(missing)}. Stop the Cartesian "
+                "zmq_server.py and restart the joint server on the same port."
+            )
+        self.robot_client.reset_to_home()
         self.robot_client.get_state()
         t_start = time.monotonic()
         iter_idx = 0
