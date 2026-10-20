@@ -45,6 +45,7 @@ from omegaconf import OmegaConf
 from utils.other_util import precise_wait
 from peripherals.keystroke_counter import KeystrokeCounter, Key, KeyCode
 from utils.real_inference_util import (
+    blend_overlapping_action_chunk,
     get_real_obs_dict,
     get_real_obs_resolution,
     get_real_umi_obs_dict,
@@ -188,6 +189,13 @@ def solve_sphere_collision(ee_poses, robots_config):
     "--frequency", "-f", default=5, type=float, help="Control frequency in Hz."
 )
 @click.option(
+    "--chunk-blend",
+    default=0.5,
+    type=click.FloatRange(0.0, 1.0),
+    show_default=True,
+    help="Weight old predictions at overlapping action-chunk boundaries.",
+)
+@click.option(
     "--command_latency",
     "-cl",
     default=0.01,
@@ -225,6 +233,7 @@ def main(
     steps_per_inference,
     max_duration,
     frequency,
+    chunk_blend,
     command_latency,
     no_mirror,
     gripper_mask,
@@ -712,6 +721,7 @@ def main(
                             "robot_index": 0,
                             "frequency_hz": frequency,
                             "steps_per_inference": steps_per_inference,
+                            "chunk_blend": chunk_blend,
                         },
                     )
                     episode_status = "running"
@@ -738,6 +748,8 @@ def main(
                     precise_wait(eval_t_start - frame_latency, time_func=time.time)
                     print("Started!")
                     iter_idx = 0
+                    previous_policy_action = None
+                    previous_action_timestamps = None
                     perv_target_pose = None
                     while True:
                         # calculate timing
@@ -852,6 +864,20 @@ def main(
                                 )
 
                         action = get_real_umi_action(raw_action, obs, action_pose_repr)
+                        action_timestamps = (
+                            np.arange(len(action), dtype=np.float64)
+                        ) * dt + obs_timestamps[-1]
+                        action = blend_overlapping_action_chunk(
+                            action=action,
+                            timestamps=action_timestamps,
+                            previous_action=previous_policy_action,
+                            previous_timestamps=previous_action_timestamps,
+                            dt=dt,
+                            blend=chunk_blend,
+                            blend_steps=steps_per_inference,
+                        )
+                        previous_policy_action = action.copy()
+                        previous_action_timestamps = action_timestamps.copy()
                         inference_latency_s = time.time() - s
                         raw_pos = raw_action[0, :3]
                         if raw_action.shape[-1] == 7:
@@ -923,9 +949,6 @@ def main(
 
                         # deal with timing
                         # the same step actions are always the target for
-                        action_timestamps = (
-                            np.arange(len(action), dtype=np.float64)
-                        ) * dt + obs_timestamps[-1]
                         # action_exec_latency = 0.01
                         # curr_time = time.time()
                         # is_new = action_timestamps > (curr_time + action_exec_latency)

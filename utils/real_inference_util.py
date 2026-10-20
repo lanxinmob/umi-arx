@@ -231,3 +231,47 @@ def get_real_umi_action(
 
     env_action = np.concatenate(env_action, axis=-1)
     return env_action
+
+
+def blend_overlapping_action_chunk(
+    action: np.ndarray,
+    timestamps: np.ndarray,
+    previous_action: np.ndarray,
+    previous_timestamps: np.ndarray,
+    dt: float,
+    blend: float = 0.5,
+    blend_steps: int = 4,
+) -> np.ndarray:
+    """Blend the near-term overlap between two absolute action chunks.
+
+    Replanning replaces a future trajectory with a new prediction. Averaging
+    the first few matching timestamps keeps that replacement continuous while
+    leaving the farther part of the new horizon untouched. ``blend`` is the
+    weight of the previous chunk and is faded to zero across ``blend_steps``.
+    """
+    action = np.asarray(action)
+    if (
+        blend <= 0
+        or previous_action is None
+        or previous_timestamps is None
+        or len(action) == 0
+        or len(previous_action) == 0
+    ):
+        return action
+    if action.ndim != 2 or previous_action.ndim != 2:
+        raise ValueError("Action chunks must have shape (horizon, action_dim)")
+    if action.shape[1] != previous_action.shape[1]:
+        raise ValueError("Action chunks must have the same action dimension")
+    if dt <= 0 or not np.isfinite(dt):
+        raise ValueError("dt must be positive and finite")
+    blend_steps = max(1, min(int(blend_steps), len(action)))
+    tolerance = max(0.25 * dt, 1e-3)
+    result = action.copy()
+    for index in range(blend_steps):
+        nearest = int(np.argmin(np.abs(previous_timestamps - timestamps[index])))
+        if abs(float(previous_timestamps[nearest] - timestamps[index])) > tolerance:
+            continue
+        fade = 1.0 - index / blend_steps
+        weight = float(np.clip(blend * fade, 0.0, 1.0))
+        result[index] = (1.0 - weight) * result[index] + weight * previous_action[nearest]
+    return result
