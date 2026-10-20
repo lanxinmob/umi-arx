@@ -562,8 +562,18 @@ def main(
                     start_policy = False
                     for key_stroke in press_events:
                         if key_stroke == KeyCode(char="q"):
-                            # Exit program
-                            env.end_episode()
+                            # Stop recording, then explicitly return every
+                            # connected arm to the SDK home pose before the
+                            # context manager tears down the controller.
+                            # Controller shutdown alone only applies damping
+                            # and would leave a dragged arm where it was.
+                            print("Returning robot arm(s) to home. Please wait...", flush=True)
+                            try:
+                                env.end_episode()
+                            finally:
+                                for robot in env.robots:
+                                    robot.reset_to_home()
+                            print("Home pose reached; exiting.", flush=True)
                             exit(0)
                         elif key_stroke in (KeyCode(char="c"), KeyCode(char="C")):
                             # Exit human control loop

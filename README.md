@@ -57,6 +57,8 @@ transition. The first 0.8 s of a replanned chunk is blended with the previous
 chunk by default. The SDK anchors each replacement to measured joint feedback
 and uses cubic interpolation in its 500 Hz servo loop; the client polls
 feedback at 200 Hz.
+Press `q` in the human-control view to stop recording and return the arm to the
+SDK home pose before exiting.
 With the default `--steps_per_inference 4`, policy replanning is 1.25 Hz (every
 0.8 s), while each response contains a 16-step horizon. Overlapping chunks are
 blended by default; use `--chunk-blend 0` to disable that boundary smoothing.
