@@ -22,3 +22,21 @@ An empty robot observation buffer is a robot state acquisition failure, not a
 model inference failure. Do not substitute zero poses or change the checkpoint
 to bypass it. Restart the client after resolving the reported connection or
 controller error.
+
+## Absolute-joint ARX5 policy
+
+For a checkpoint whose action representation is `absolute_joint` with seven
+values (`q1..q6` in radians followed by gripper width in meters), use the joint
+server on port 8765:
+
+```bash
+cd /home/hjadmin/projects/arx5-sdk/python
+python communication/zmq_joint_server.py X5_umi can0 --port 8765
+```
+
+Run the DGM policy service on port 8766, then start the client from this
+repository. The client uses a 5 Hz action clock, sends interpolated joint
+targets at 200 Hz, and the SDK servo loop remains 500 Hz. With the default
+`--steps_per_inference 4`, policy replanning is 1.25 Hz (every 0.8 s), while
+each response contains a 16-step horizon. Overlapping chunks are blended by
+default; use `--chunk-blend 0` to disable that boundary smoothing.
