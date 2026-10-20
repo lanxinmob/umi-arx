@@ -499,10 +499,13 @@ class Arx5Env:
                         :, 7 * robot_idx + 0 : 7 * robot_idx + 6
                     ]
                     g_actions = new_actions[:, 7 * robot_idx + 6]
+                    r_latency = (
+                        rc["robot_action_latency"] if compensate_latency else 0.0
+                    )
                     robot.set_joint_trajectory(
                         joint_pos=r_actions,
                         gripper_pos=g_actions,
-                        target_times=new_timestamps,
+                        target_times=new_timestamps - r_latency,
                     )
                     continue
                 for i in range(len(new_actions)):
