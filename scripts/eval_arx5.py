@@ -867,15 +867,16 @@ def main(
                         action_timestamps = (
                             np.arange(len(action), dtype=np.float64)
                         ) * dt + obs_timestamps[-1]
-                        action = blend_overlapping_action_chunk(
-                            action=action,
-                            timestamps=action_timestamps,
-                            previous_action=previous_policy_action,
-                            previous_timestamps=previous_action_timestamps,
-                            dt=dt,
-                            blend=chunk_blend,
-                            blend_steps=steps_per_inference,
-                        )
+                        if action_pose_repr == "absolute_joint":
+                            action = blend_overlapping_action_chunk(
+                                action=action,
+                                timestamps=action_timestamps,
+                                previous_action=previous_policy_action,
+                                previous_timestamps=previous_action_timestamps,
+                                dt=dt,
+                                blend=chunk_blend,
+                                blend_steps=steps_per_inference,
+                            )
                         previous_policy_action = action.copy()
                         previous_action_timestamps = action_timestamps.copy()
                         inference_latency_s = time.time() - s
