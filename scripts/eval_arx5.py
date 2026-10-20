@@ -13,11 +13,18 @@ Click the opencv window (make sure it's in focus).
 Press "C" to start evaluation (hand control over to policy).
 Press "Q" to exit program.
 
+For an ``absolute_joint`` checkpoint, the human loop uses the joint server's
+gravity-compensated drag mode; ``C`` locks the current joint pose before policy
+control starts.
+
 ================ Policy in control ==============
 Make sure you can hit the robot hardware emergency-stop button quickly! 
 
 Recording control:
 Press "S" to stop evaluation and gain control back.
+
+For joint control, ``S`` stops the queued policy trajectory before returning to
+drag mode.
 """
 
 # %%
