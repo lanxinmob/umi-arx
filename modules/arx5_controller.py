@@ -591,16 +591,23 @@ class Arx5Controller(mp.Process):
         """
         np.set_printoptions(precision=3, suppress=True)
         dt = 1 / self.frequency
-        self.robot_client.get_state()
-        missing = {"armed", "mode"}.difference(self.robot_client.latest_state)
-        if missing:
-            raise RuntimeError(
-                "Joint control requires communication/zmq_joint_server.py; "
-                f"GET_STATE is missing {sorted(missing)}. Stop the Cartesian "
-                "zmq_server.py and restart the joint server on the same port."
-            )
-        self.robot_client.reset_to_home()
-        self.robot_client.get_state()
+        try:
+            self.robot_client.get_state()
+            missing = {"armed", "mode"}.difference(self.robot_client.latest_state)
+            if missing:
+                raise RuntimeError(
+                    "Joint control requires communication/zmq_joint_server.py; "
+                    f"GET_STATE is missing {sorted(missing)}. Stop the Cartesian "
+                    "zmq_server.py and restart the joint server on the same port."
+                )
+            self.robot_client.reset_to_home()
+            self.robot_client.get_state()
+        except Exception:
+            try:
+                self.robot_client.set_to_damping()
+            except Exception:
+                pass
+            raise
         t_start = time.monotonic()
         iter_idx = 0
         manual_drag = False
