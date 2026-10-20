@@ -68,6 +68,11 @@ OmegaConf.register_new_resolver("eval", eval, replace=True)
 
 PREVIEW_MAX_SIZE = (960, 720)
 JOINT_ACTION_RESAMPLE_DT = 0.01
+# Keep the first predicted joint waypoint in the future.  The observation
+# timestamp is intentionally older than the wall clock by camera and policy
+# latency; submitting it unchanged would drop the initial waypoints and make
+# the SDK jump to a later joint target almost immediately.
+JOINT_ACTION_MIN_LEAD_STEPS = 1
 
 
 def fit_preview_image(image, max_size=PREVIEW_MAX_SIZE):
@@ -727,6 +732,9 @@ def main(
                             "joint_action_resample_hz": (
                                 1.0 / JOINT_ACTION_RESAMPLE_DT
                             ),
+                            "joint_action_min_lead_s": (
+                                JOINT_ACTION_MIN_LEAD_STEPS / frequency
+                            ),
                         },
                     )
                     episode_status = "running"
@@ -873,6 +881,13 @@ def main(
                             np.arange(len(action), dtype=np.float64)
                         ) * dt + obs_timestamps[-1]
                         if action_pose_repr == "absolute_joint":
+                            min_joint_start = time.time() + (
+                                JOINT_ACTION_MIN_LEAD_STEPS * dt
+                            )
+                            if action_timestamps[0] < min_joint_start:
+                                action_timestamps += (
+                                    min_joint_start - action_timestamps[0]
+                                )
                             action, action_timestamps = resample_timed_action_chunk(
                                 action=action,
                                 timestamps=action_timestamps,

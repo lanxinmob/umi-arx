@@ -44,9 +44,11 @@ trajectory protocol.
 Run the DGM policy service on port 8766, then start the client from this
 repository. The client uses a 5 Hz action clock and submits each future joint
 chunk after linear resampling to 100 Hz as one `SET_JOINT_TRAJ` request. The
-first 0.8 s of a replanned chunk is blended with the previous chunk by default.
-The SDK keeps the resulting trajectory and interpolates it in its 500 Hz servo
-loop; the client polls feedback at 200 Hz.
+first waypoint is kept at least one action step (0.2 s at the default 5 Hz
+clock) in the future so camera and inference latency cannot collapse the first
+transition. The first 0.8 s of a replanned chunk is blended with the previous
+chunk by default. The SDK keeps the resulting trajectory and interpolates it in
+its 500 Hz servo loop; the client polls feedback at 200 Hz.
 With the default `--steps_per_inference 4`, policy replanning is 1.25 Hz (every
 0.8 s), while each response contains a 16-step horizon. Overlapping chunks are
 blended by default; use `--chunk-blend 0` to disable that boundary smoothing.
