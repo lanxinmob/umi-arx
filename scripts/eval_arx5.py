@@ -177,7 +177,7 @@ def solve_sphere_collision(ee_poses, robots_config):
     "-si",
     default=4,
     type=int,
-    help="Action horizon for inference.",
+    help="Action-clock steps between policy replans.",
 )
 @click.option(
     "--max_duration",
@@ -186,7 +186,7 @@ def solve_sphere_collision(ee_poses, robots_config):
     help="Max duration for each epoch in seconds.",
 )
 @click.option(
-    "--frequency", "-f", default=5, type=float, help="Control frequency in Hz."
+    "--frequency", "-f", default=5, type=float, help="Action sample clock in Hz."
 )
 @click.option(
     "--chunk-blend",
