@@ -97,6 +97,7 @@ class Arx5Controller(mp.Process):
         self.receive_keys = receive_keys
         self.frequency = frequency
         self.receive_latency = receive_latency
+        self.mode_state = Value(ctypes.c_int, 0)  # 0=hold, 1=drag, -1=stopped
 
         # Will be initialized in the subprocess
         self.robot_client: Arx5Client
@@ -213,15 +214,34 @@ class Arx5Controller(mp.Process):
             "target_time": float(target_time),
         })
 
-    def drag(self):
+    def drag(self, wait=True, timeout=2.0):
         if self.control_mode != "joint":
             raise RuntimeError("Drag mode is only available for a joint controller")
         self.input_queue.put({"cmd": Command.JOINT_DRAG.value})
+        if wait:
+            self._wait_for_mode(1, timeout)
 
-    def hold(self):
+    def hold(self, wait=True, timeout=2.0):
         if self.control_mode != "joint":
             raise RuntimeError("Hold mode is only available for a joint controller")
         self.input_queue.put({"cmd": Command.JOINT_HOLD.value})
+        if wait:
+            self._wait_for_mode(0, timeout)
+
+    def _wait_for_mode(self, expected, timeout):
+        deadline = time.monotonic() + timeout
+        while self.mode_state.value != expected:
+            if not self.is_alive():
+                raise RuntimeError(
+                    f"ARX5 controller exited while switching joint mode "
+                    f"(exitcode={self.exitcode})"
+                )
+            if time.monotonic() >= deadline:
+                raise TimeoutError(
+                    f"Timed out waiting for joint controller mode {expected}; "
+                    f"current={self.mode_state.value}"
+                )
+            time.sleep(0.005)
 
     def add_waypoint(
         self, pose: npt.NDArray[np.float64], gripper_pos: float, target_time: float
@@ -559,6 +579,7 @@ class Arx5Controller(mp.Process):
                     if cmd == Command.JOINT_DRAG.value:
                         self.robot_client.drag()
                         manual_drag = True
+                        self.mode_state.value = 1
                         self.waypoint_buffer = []
                     elif cmd == Command.JOINT_HOLD.value:
                         self.robot_client.hold()
@@ -571,6 +592,7 @@ class Arx5Controller(mp.Process):
                         joint_interp = PoseTrajectoryInterpolator(
                             times=np.array([curr_t]), poses=np.array([curr_joints])
                         )
+                        self.mode_state.value = 0
                         gripper_interp = PoseTrajectoryInterpolator(
                             times=np.array([curr_t]),
                             poses=np.array([[curr_gripper, 0, 0, 0, 0, 0]]),
@@ -617,6 +639,7 @@ class Arx5Controller(mp.Process):
                 iter_idx += 1
         finally:
             self.ready_event.clear()
+            self.mode_state.value = -1
             try:
                 self.robot_client.set_to_damping()
             except Exception:

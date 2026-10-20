@@ -541,12 +541,14 @@ def main(
                             # Exit program
                             env.end_episode()
                             exit(0)
-                        elif key_stroke == KeyCode(char="c"):
+                        elif key_stroke in (KeyCode(char="c"), KeyCode(char="C")):
                             # Exit human control loop
                             # hand control over to the policy
                             if joint_control:
+                                print("HOLD requested; locking the dragged joint pose...", flush=True)
                                 for robot in env.robots:
                                     robot.hold()
+                                print("HOLD confirmed; starting policy control.", flush=True)
                             start_policy = True
                         elif key_stroke == KeyCode(char="e"):
                             # Next episode
