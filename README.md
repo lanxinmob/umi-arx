@@ -64,3 +64,9 @@ With the default `--steps_per_inference 4`, policy replanning is 1.25 Hz (every
 blended by default; use `--chunk-blend 0` to disable that boundary smoothing.
 The joint server ramps HOLD gains for 0.3 s after `C`; keep the arm still until
 the `HOLD confirmed` message appears.
+
+`scripts/eval_arx5.py` applies a fresh random field-of-view scale to each policy
+observation batch by default. It samples `s ~ U(0.7, 1.3)`, center-crops and
+bilinearly resizes when `s < 1`, and centers a `1 / s` resize on a black canvas
+when `s > 1`. The sampled value is saved as `image_scale_factor` with each
+recorded observation.

@@ -75,6 +75,8 @@ OmegaConf.register_new_resolver("eval", eval, replace=True)
 
 PREVIEW_MAX_SIZE = (960, 720)
 JOINT_ACTION_RESAMPLE_DT = 0.01
+IMAGE_SCALE_MIN = 0.7
+IMAGE_SCALE_MAX = 1.3
 # Keep the first predicted joint waypoint well in the future.  The observation
 # timestamp is older than the wall clock by camera and policy latency; a single
 # 200 ms lead leaves almost no room for a 180 ms inference and makes the SDK
@@ -100,6 +102,70 @@ def fit_preview_image(image, max_size=PREVIEW_MAX_SIZE):
 
     interpolation = cv2.INTER_AREA if scale < 1 else cv2.INTER_LINEAR
     return cv2.resize(image, output_size, interpolation=interpolation)
+
+
+def apply_fov_scale(image, scale):
+    """Apply a centered zoom-in or zero-padded zoom-out to one RGB image."""
+    image = np.asarray(image)
+    if image.ndim != 3 or image.shape[-1] != 3:
+        raise ValueError(f"Expected an image with shape (H, W, 3), got {image.shape}")
+    if not np.isfinite(scale) or scale <= 0:
+        raise ValueError(f"Scale must be finite and positive, got {scale}")
+
+    image = np.ascontiguousarray(image)
+    height, width = image.shape[:2]
+    if scale == 1.0:
+        return image.copy()
+
+    if scale < 1.0:
+        crop_height = max(1, min(height, int(round(scale * height))))
+        crop_width = max(1, min(width, int(round(scale * width))))
+        top = (height - crop_height) // 2
+        left = (width - crop_width) // 2
+        cropped = image[top : top + crop_height, left : left + crop_width]
+        return cv2.resize(
+            cropped, (width, height), interpolation=cv2.INTER_LINEAR
+        )
+
+    resize_height = max(1, min(height, int(round(height / scale))))
+    resize_width = max(1, min(width, int(round(width / scale))))
+    resized = cv2.resize(
+        image, (resize_width, resize_height), interpolation=cv2.INTER_LINEAR
+    )
+    output = np.zeros_like(image)
+    top = (height - resize_height) // 2
+    left = (width - resize_width) // 2
+    output[top : top + resize_height, left : left + resize_width] = resized
+    return output
+
+
+def apply_random_fov_scale(obs_dict, shape_meta, rng=None):
+    """Sample one FOV scale for every RGB image in an observation batch."""
+    if rng is None:
+        rng = np.random
+    scale = float(rng.uniform(IMAGE_SCALE_MIN, IMAGE_SCALE_MAX))
+
+    for key, attr in shape_meta["obs"].items():
+        if attr.get("type", "low_dim") != "rgb":
+            continue
+
+        images = np.asarray(obs_dict[key])
+        if images.ndim < 3 or images.shape[-3] != 3:
+            raise ValueError(
+                f"Expected policy RGB input {key} in (..., 3, H, W) format, "
+                f"got {images.shape}"
+            )
+
+        images_hwc = np.moveaxis(images, -3, -1)
+        image_shape = images_hwc.shape
+        height, width = image_shape[-3:-1]
+        flat_images = images_hwc.reshape((-1, height, width, 3))
+        scaled_images = np.stack(
+            [apply_fov_scale(image, scale) for image in flat_images], axis=0
+        ).reshape(image_shape)
+        obs_dict[key] = np.moveaxis(scaled_images, -1, -3)
+
+    return scale
 
 
 def solve_table_collision(ee_pose, gripper_width, height_threshold):
@@ -450,8 +516,10 @@ def main(
                 tx_robot1_robot0=tx_robot1_robot0,
                 episode_start_pose=episode_start_pose,
             )
-            
-            
+            apply_random_fov_scale(
+                obs_dict=obs_dict_np,
+                shape_meta=cfg.task.shape_meta,
+            )
             obs_dict_np['task_name'] = task_name
 
             socket.send_pyobj(obs_dict_np)
@@ -835,9 +903,11 @@ def main(
                             tx_robot1_robot0=tx_robot1_robot0,
                             episode_start_pose=episode_start_pose,
                         )
-                        
+                        image_scale_factor = apply_random_fov_scale(
+                            obs_dict=obs_dict_np,
+                            shape_meta=cfg.task.shape_meta,
+                        )
                         obs_dict_np['task_name'] = task_name
-
 
                         obs_data = {
                             "obs_dict_np": obs_dict_np,
@@ -846,6 +916,7 @@ def main(
                             "original_imgs": original_imgs,
                             "episode_start_pose": episode_start_pose,
                             "tx_robot1_robot0": tx_robot1_robot0,
+                            "image_scale_factor": image_scale_factor,
                         }
                         np.save(
                             os.path.join(
