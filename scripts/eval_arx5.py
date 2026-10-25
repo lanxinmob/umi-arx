@@ -63,6 +63,7 @@ from peripherals.spacemouse_shared_memory import Spacemouse
 from peripherals.gamepad_teleop import GamepadTeleop
 from utils.pose_util import pose_to_mat, mat_to_pose, rot6d_to_mat
 from utils.pose_episode_logger import PoseEpisodeLogger
+from utils.cv2_util import apply_fov_scale
 import scipy.spatial.transform as st
 
 from peripherals.keyboard_teleop import KeyboardTeleop
@@ -102,64 +103,6 @@ def fit_preview_image(image, max_size=PREVIEW_MAX_SIZE):
 
     interpolation = cv2.INTER_AREA if scale < 1 else cv2.INTER_LINEAR
     return cv2.resize(image, output_size, interpolation=interpolation)
-
-
-def apply_fov_scale(image, scale):
-    """Apply a centered zoom-in or zero-padded zoom-out to one RGB image."""
-    image = np.asarray(image)
-    if image.ndim != 3 or image.shape[-1] != 3:
-        raise ValueError(f"Expected an image with shape (H, W, 3), got {image.shape}")
-    if not np.isfinite(scale) or scale <= 0:
-        raise ValueError(f"Scale must be finite and positive, got {scale}")
-
-    image = np.ascontiguousarray(image)
-    height, width = image.shape[:2]
-    if scale == 1.0:
-        return image.copy()
-
-    if scale < 1.0:
-        crop_height = max(1, min(height, int(round(scale * height))))
-        crop_width = max(1, min(width, int(round(scale * width))))
-        top = (height - crop_height) // 2
-        left = (width - crop_width) // 2
-        cropped = image[top : top + crop_height, left : left + crop_width]
-        return cv2.resize(
-            cropped, (width, height), interpolation=cv2.INTER_LINEAR
-        )
-
-    resize_height = max(1, min(height, int(round(height / scale))))
-    resize_width = max(1, min(width, int(round(width / scale))))
-    resized = cv2.resize(
-        image, (resize_width, resize_height), interpolation=cv2.INTER_LINEAR
-    )
-    output = np.zeros_like(image)
-    top = (height - resize_height) // 2
-    left = (width - resize_width) // 2
-    output[top : top + resize_height, left : left + resize_width] = resized
-    return output
-
-
-def apply_fov_scale_to_obs(obs_dict, shape_meta, scale):
-    """Apply one fixed FOV scale to every RGB image in an observation batch."""
-    for key, attr in shape_meta["obs"].items():
-        if attr.get("type", "low_dim") != "rgb":
-            continue
-
-        images = np.asarray(obs_dict[key])
-        if images.ndim < 3 or images.shape[-3] != 3:
-            raise ValueError(
-                f"Expected policy RGB input {key} in (..., 3, H, W) format, "
-                f"got {images.shape}"
-            )
-
-        images_hwc = np.moveaxis(images, -3, -1)
-        image_shape = images_hwc.shape
-        height, width = image_shape[-3:-1]
-        flat_images = images_hwc.reshape((-1, height, width, 3))
-        scaled_images = np.stack(
-            [apply_fov_scale(image, scale) for image in flat_images], axis=0
-        ).reshape(image_shape)
-        obs_dict[key] = np.moveaxis(scaled_images, -1, -3)
 
 
 def solve_table_collision(ee_pose, gripper_width, height_threshold):
@@ -450,6 +393,7 @@ def main(
             robot_obs_horizon=cfg.task.shape_meta.obs.robot0_eef_pos.horizon,
             no_mirror=no_mirror,
             gripper_mask=gripper_mask,
+            image_scale=image_scale,
             # fisheye_converter=fisheye_converter,
             mirror_swap=mirror_swap,
             # action
@@ -519,11 +463,6 @@ def main(
                 tx_robot1_robot0=tx_robot1_robot0,
                 episode_start_pose=episode_start_pose,
             )
-            apply_fov_scale_to_obs(
-                obs_dict=obs_dict_np,
-                shape_meta=cfg.task.shape_meta,
-                scale=image_scale,
-            )
             obs_dict_np['task_name'] = task_name
 
             socket.send_pyobj(obs_dict_np)
@@ -588,9 +527,7 @@ def main(
                     os.makedirs(
                         os.path.join(output, "action", f"{episode_id}"), exist_ok=True
                     )
-                    vis_img = apply_fov_scale(
-                        obs["camera0_rgb"][-1], image_scale
-                    )
+                    vis_img = obs["camera0_rgb"][-1]
 
                     if match_dataset_path is not None:
                         assert match_episode is not None
@@ -911,11 +848,6 @@ def main(
                             tx_robot1_robot0=tx_robot1_robot0,
                             episode_start_pose=episode_start_pose,
                         )
-                        apply_fov_scale_to_obs(
-                            obs_dict=obs_dict_np,
-                            shape_meta=cfg.task.shape_meta,
-                            scale=image_scale,
-                        )
                         image_scale_factor = image_scale
                         obs_dict_np['task_name'] = task_name
 
@@ -1115,10 +1047,8 @@ def main(
 
                         # visualize
                         episode_id = env.replay_buffer.n_episodes
-                        scaled_img = apply_fov_scale(
-                            obs["camera0_rgb"][-1], image_scale
-                        )
-                        vis_img = np.concatenate([scaled_img, scaled_img], axis=1)
+                        obs_img = obs["camera0_rgb"][-1]
+                        vis_img = np.concatenate([obs_img, obs_img], axis=1)
                         text = "Episode: {}, Time: {:.1f}".format(
                             episode_id, time.monotonic() - t_start
                         )

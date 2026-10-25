@@ -12,7 +12,7 @@ from modules.timestamp_accumulator import TimestampActionAccumulator, ObsAccumul
 from utils.cv_util import draw_predefined_mask
 from peripherals.multi_camera_visualizer import MultiCameraVisualizer
 from modules.replay_buffer import ReplayBuffer
-from utils.cv2_util import get_image_transform, optimal_row_cols
+from utils.cv2_util import apply_fov_scale, get_image_transform, optimal_row_cols
 from utils.usb_util import reset_all_elgato_devices, get_sorted_v4l_paths
 from utils.interpolation_util import get_interp1d, PoseInterpolator
 
@@ -34,6 +34,7 @@ class Arx5Env:
         gripper_mask=False,
         fisheye_converter=None,
         mirror_swap=False,
+        image_scale=1.0,
         # this latency compensates receive_timestamp
         # all in seconds
         camera_obs_latency=0.125,
@@ -97,6 +98,18 @@ class Arx5Env:
         transform = list()
         vis_transform = list()
         for path in v4l_paths:
+            is_mirror = None
+            if mirror_swap:
+                mirror_mask = np.ones((224, 224, 3), dtype=np.uint8)
+                mirror_mask = draw_predefined_mask(
+                    mirror_mask,
+                    color=(0, 0, 0),
+                    mirror=True,
+                    gripper=False,
+                    finger=False,
+                )
+                is_mirror = mirror_mask[..., 0] == 0
+
             if "Cam_Link_4K" in path:
                 res = (3840, 2160)
                 fps = 30
@@ -104,7 +117,7 @@ class Arx5Env:
                 bit_rate = 6000 * 1000
                 fourcc = None
 
-                def tf4k(data, input_res=res):
+                def tf4k(data, input_res=res, mirror_mask_region=is_mirror):
                     img = data["color"]
                     f = get_image_transform(
                         input_res=input_res,
@@ -112,7 +125,18 @@ class Arx5Env:
                         # obs output rgb
                         bgr_to_rgb=True,
                     )
-                    img = f(img)
+                    img = apply_fov_scale(f(img), image_scale)
+                    if mirror_mask_region is not None:
+                        img[mirror_mask_region] = img[:, ::-1, :][mirror_mask_region]
+                    if no_mirror or gripper_mask:
+                        img = draw_predefined_mask(
+                            img,
+                            color=(0, 0, 0),
+                            mirror=no_mirror,
+                            gripper=gripper_mask,
+                            finger=False,
+                            use_aa=True,
+                        )
                     if obs_float32:
                         img = img.astype(np.float32) / 255
                     data["color"] = img
@@ -130,19 +154,7 @@ class Arx5Env:
                 # This capture-card class exposes 1080p60 only in MJPG mode.
                 fourcc = "MJPG"
 
-                is_mirror = None
-                if mirror_swap:
-                    mirror_mask = np.ones((224, 224, 3), dtype=np.uint8)
-                    mirror_mask = draw_predefined_mask(
-                        mirror_mask,
-                        color=(0, 0, 0),
-                        mirror=True,
-                        gripper=False,
-                        finger=False,
-                    )
-                    is_mirror = mirror_mask[..., 0] == 0
-
-                def tf(data, input_res=res):
+                def tf(data, input_res=res, mirror_mask_region=is_mirror):
                     img = data["color"]
                     if fisheye_converter is None:
                         f = get_image_transform(
@@ -152,20 +164,21 @@ class Arx5Env:
                             bgr_to_rgb=True,
                         )
                         img = np.ascontiguousarray(f(img))
-                        if is_mirror is not None:
-                            img[is_mirror] = img[:, ::-1, :][is_mirror]
-                        if no_mirror or gripper_mask:
-                            img = draw_predefined_mask(
-                                img,
-                                color=(0, 0, 0),
-                                mirror=no_mirror,
-                                gripper=gripper_mask,
-                                finger=False,
-                                use_aa=True,
-                            )
                     else:
                         img = fisheye_converter.forward(img)
                         img = img[..., ::-1]
+                    img = apply_fov_scale(img, image_scale)
+                    if mirror_mask_region is not None:
+                        img[mirror_mask_region] = img[:, ::-1, :][mirror_mask_region]
+                    if no_mirror or gripper_mask:
+                        img = draw_predefined_mask(
+                            img,
+                            color=(0, 0, 0),
+                            mirror=no_mirror,
+                            gripper=gripper_mask,
+                            finger=False,
+                            use_aa=True,
+                        )
                     if obs_float32:
                         img = img.astype(np.float32) / 255
                     data["color"] = img

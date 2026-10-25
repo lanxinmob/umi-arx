@@ -82,6 +82,41 @@ def draw_text(
         uv_top_left += [0, h * line_spacing]
 
 
+def apply_fov_scale(image: np.ndarray, scale: float) -> np.ndarray:
+    """Apply a centered zoom-in or zero-padded zoom-out to one RGB image."""
+    image = np.asarray(image)
+    if image.ndim != 3 or image.shape[-1] != 3:
+        raise ValueError(f"Expected an image with shape (H, W, 3), got {image.shape}")
+    if not np.isfinite(scale) or scale <= 0:
+        raise ValueError(f"Scale must be finite and positive, got {scale}")
+
+    image = np.ascontiguousarray(image)
+    height, width = image.shape[:2]
+    if scale == 1.0:
+        return image.copy()
+
+    if scale < 1.0:
+        crop_height = max(1, min(height, int(round(scale * height))))
+        crop_width = max(1, min(width, int(round(scale * width))))
+        top = (height - crop_height) // 2
+        left = (width - crop_width) // 2
+        cropped = image[top : top + crop_height, left : left + crop_width]
+        return cv2.resize(
+            cropped, (width, height), interpolation=cv2.INTER_LINEAR
+        )
+
+    resize_height = max(1, min(height, int(round(height / scale))))
+    resize_width = max(1, min(width, int(round(width / scale))))
+    resized = cv2.resize(
+        image, (resize_width, resize_height), interpolation=cv2.INTER_LINEAR
+    )
+    output = np.zeros_like(image)
+    top = (height - resize_height) // 2
+    left = (width - resize_width) // 2
+    output[top : top + resize_height, left : left + resize_width] = resized
+    return output
+
+
 def get_image_transform(
     input_res: Tuple[int, int] = (1280, 720),
     output_res: Tuple[int, int] = (640, 480),

@@ -66,7 +66,9 @@ The joint server ramps HOLD gains for 0.3 s after `C`; keep the arm still until
 the `HOLD confirmed` message appears.
 
 `scripts/eval_arx5.py` applies the manually selected field-of-view scale to each
-policy observation batch. Pass `--image-scale 0.7` for zoom-in, `--image-scale
-1.3` for zoom-out, or omit it to use `1.0` without a FOV transform. Values are
-limited to `0.7–1.3`; the selected value is saved as `image_scale_factor` with
-each recorded observation.
+policy observation batch and desktop preview. Pass `--image-scale 0.7` for
+zoom-in, `--image-scale 1.3` for zoom-out, or omit it to use `1.0` without a
+FOV transform. Values are limited to `0.7–1.3`. Camera preprocessing applies
+this scale before `--no-mirror` and `--gripper-mask`, then feeds the same
+processed frame to the policy and display; the selected value is saved as
+`image_scale_factor` with each recorded observation.
