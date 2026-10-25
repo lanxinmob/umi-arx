@@ -588,12 +588,16 @@ def main(
                     os.makedirs(
                         os.path.join(output, "action", f"{episode_id}"), exist_ok=True
                     )
-                    vis_img = obs[f"camera0_rgb"][-1]
+                    vis_img = apply_fov_scale(
+                        obs["camera0_rgb"][-1], image_scale
+                    )
 
                     if match_dataset_path is not None:
                         assert match_episode is not None
                         match_data = np.load(os.path.join(match_dataset_path, "obs", f"{match_episode}/0.npy"), allow_pickle=True).item()
-                        obs_left_img = match_data["obs"]['camera0_rgb'][-1]
+                        obs_left_img = apply_fov_scale(
+                            match_data["obs"]["camera0_rgb"][-1], image_scale
+                        )
                         vis_img = np.concatenate(
                             [obs_left_img, vis_img], axis=1
                         )
@@ -1111,9 +1115,10 @@ def main(
 
                         # visualize
                         episode_id = env.replay_buffer.n_episodes
-                        obs_left_img = obs["camera0_rgb"][-1]
-                        obs_right_img = obs["camera0_rgb"][-1]
-                        vis_img = np.concatenate([obs_left_img, obs_right_img], axis=1)
+                        scaled_img = apply_fov_scale(
+                            obs["camera0_rgb"][-1], image_scale
+                        )
+                        vis_img = np.concatenate([scaled_img, scaled_img], axis=1)
                         text = "Episode: {}, Time: {:.1f}".format(
                             episode_id, time.monotonic() - t_start
                         )
