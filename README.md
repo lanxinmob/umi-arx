@@ -65,8 +65,8 @@ blended by default; use `--chunk-blend 0` to disable that boundary smoothing.
 The joint server ramps HOLD gains for 0.3 s after `C`; keep the arm still until
 the `HOLD confirmed` message appears.
 
-`scripts/eval_arx5.py` applies a fresh random field-of-view scale to each policy
-observation batch by default. It samples `s ~ U(0.7, 1.3)`, center-crops and
-bilinearly resizes when `s < 1`, and centers a `1 / s` resize on a black canvas
-when `s > 1`. The sampled value is saved as `image_scale_factor` with each
-recorded observation.
+`scripts/eval_arx5.py` applies the manually selected field-of-view scale to each
+policy observation batch. Pass `--image-scale 0.7` for zoom-in, `--image-scale
+1.3` for zoom-out, or omit it to use `1.0` without a FOV transform. Values are
+limited to `0.7–1.3`; the selected value is saved as `image_scale_factor` with
+each recorded observation.

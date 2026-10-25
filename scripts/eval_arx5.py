@@ -139,12 +139,8 @@ def apply_fov_scale(image, scale):
     return output
 
 
-def apply_random_fov_scale(obs_dict, shape_meta, rng=None):
-    """Sample one FOV scale for every RGB image in an observation batch."""
-    if rng is None:
-        rng = np.random
-    scale = float(rng.uniform(IMAGE_SCALE_MIN, IMAGE_SCALE_MAX))
-
+def apply_fov_scale_to_obs(obs_dict, shape_meta, scale):
+    """Apply one fixed FOV scale to every RGB image in an observation batch."""
     for key, attr in shape_meta["obs"].items():
         if attr.get("type", "low_dim") != "rgb":
             continue
@@ -164,8 +160,6 @@ def apply_random_fov_scale(obs_dict, shape_meta, rng=None):
             [apply_fov_scale(image, scale) for image in flat_images], axis=0
         ).reshape(image_shape)
         obs_dict[key] = np.moveaxis(scaled_images, -1, -3)
-
-    return scale
 
 
 def solve_table_collision(ee_pose, gripper_width, height_threshold):
@@ -290,6 +284,13 @@ def solve_sphere_collision(ee_poses, robots_config):
     show_default=True,
     help="Show or hide the black gripper mask at the bottom of camera observations.",
 )
+@click.option(
+    "--image-scale",
+    type=click.FloatRange(IMAGE_SCALE_MIN, IMAGE_SCALE_MAX),
+    default=1.0,
+    show_default=True,
+    help="Fixed FOV scale for policy images (0.7 zoom-in, 1.3 zoom-out).",
+)
 @click.option("-sf", "--sim_fov", type=float, default=None)
 @click.option("-ci", "--camera_intrinsics", type=str, default=None)
 @click.option("--mirror_swap", is_flag=True, default=False)
@@ -318,6 +319,7 @@ def main(
     command_latency,
     no_mirror,
     gripper_mask,
+    image_scale,
     sim_fov,
     camera_intrinsics,
     mirror_swap,
@@ -327,6 +329,7 @@ def main(
 ):
     pid = os.getpid()
     os.sched_setaffinity(pid, [7])
+    print(f"Policy image scale factor: {image_scale}")
     os.makedirs(output, exist_ok=True)
     os.makedirs(os.path.join(output, "obs"), exist_ok=True)
     os.makedirs(os.path.join(output, "action"), exist_ok=True)
@@ -516,9 +519,10 @@ def main(
                 tx_robot1_robot0=tx_robot1_robot0,
                 episode_start_pose=episode_start_pose,
             )
-            apply_random_fov_scale(
+            apply_fov_scale_to_obs(
                 obs_dict=obs_dict_np,
                 shape_meta=cfg.task.shape_meta,
+                scale=image_scale,
             )
             obs_dict_np['task_name'] = task_name
 
@@ -903,10 +907,12 @@ def main(
                             tx_robot1_robot0=tx_robot1_robot0,
                             episode_start_pose=episode_start_pose,
                         )
-                        image_scale_factor = apply_random_fov_scale(
+                        apply_fov_scale_to_obs(
                             obs_dict=obs_dict_np,
                             shape_meta=cfg.task.shape_meta,
+                            scale=image_scale,
                         )
+                        image_scale_factor = image_scale
                         obs_dict_np['task_name'] = task_name
 
                         obs_data = {
