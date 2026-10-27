@@ -26,6 +26,32 @@ model inference failure. Do not substitute zero poses or change the checkpoint
 to bypass it. Restart the client after resolving the reported connection or
 controller error.
 
+## Keyboard evaluation
+
+`scripts/eval_arx5.py` defaults to `--teleop-device keyboard`. Click the camera
+preview to focus it and use an English input layout with Caps Lock off.
+For Cartesian checkpoints (including `umi_multitask.ckpt`), hold these keys in
+the `Human in control` view:
+
+| Keys | Action |
+| --- | --- |
+| Up/Down or `w`/`s` | Move along +X/-X |
+| Left/Right or `a`/`d` | Move along +Y/-Y |
+| PageUp/PageDown or `z`/`x` | Move along +Z/-Z |
+| `i`/`k`, `j`/`l`, `u`/`o` | Rotate around end-effector X, Y, Z |
+| `f` / `r` | Close / open gripper |
+| `f` + `r` | Return the selected arm(s) home |
+| `c` | Start policy control |
+| `s` during policy control | Stop policy and return to human control |
+| `q` during human control | Return home and quit |
+
+On Linux Wayland desktops, the script uses Qt's `xcb` platform for the preview
+through XWayland because `pynput` listens for X11 keyboard events. This setting
+only affects this process. Keep the preview focused: keys typed into a native
+Wayland terminal are invisible to the X11 listener.
+Absolute-joint checkpoints use hand dragging instead of keyboard movement, as
+described below.
+
 ## Absolute-joint ARX5 policy
 
 For a checkpoint whose action representation is `absolute_joint` with seven

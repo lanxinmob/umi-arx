@@ -4,9 +4,10 @@ Usage:
 
 ================ Human in control ==============
 Robot movement:
-Move your SpaceMouse to move the robot EEF (locked in xy plane).
-Press SpaceMouse right button to unlock z axis.
-Press SpaceMouse left button to enable rotation axes.
+Keyboard is the default teleop device. Hold arrow keys or W/S/A/D for XY,
+PageUp/PageDown or Z/X for Z, and I/K, J/L, U/O for rotation.
+Hold F/R to close/open the gripper; press both to return home.
+Use --teleop-device spacemouse or gamepad to select another device.
 
 Recording control:
 Click the opencv window (make sure it's in focus).
@@ -43,6 +44,12 @@ import os
 import pathlib
 import time
 from multiprocessing.managers import SharedMemoryManager
+
+# pynput's Linux listener uses X11. A native Wayland preview receives keyboard
+# events that the listener cannot see, so keep both on X11 through XWayland.
+# This only changes the current process and must precede OpenCV initialization.
+if sys.platform.startswith("linux") and os.environ.get("WAYLAND_DISPLAY"):
+    os.environ["QT_QPA_PLATFORM"] = "xcb"
 
 import click
 import cv2
@@ -498,6 +505,9 @@ def main(
                     for robot in env.robots:
                         robot.drag()
                     print("Joint drag mode: move the arm by hand; press 'c' to hold and start policy.")
+                elif teleop_device == "keyboard":
+                    print("Focus the preview window. Hold arrows/WASD: XY, PgUp/PgDn or Z/X: Z.")
+                    print("I/K J/L U/O: rotate; F/R: close/open gripper; C: policy; Q: home and quit.")
                 robot_states = env.get_robot_state()
                 target_pose = np.stack([rs["ActualTCPPose"] for rs in robot_states])
 
