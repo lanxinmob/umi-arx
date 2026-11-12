@@ -1,2 +1,22 @@
 __pycache__
 data
+# Local credentials, environments, experiment artifacts
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+.venv/
+.venv-torch/
+.cache/
+outputs/
+checkpoints/
+recordings/
+*.hdf5
+*.h5
+*.zarr/
+*.ckpt
+*.pt
+*.pth
+*.safetensors
+config.local.*
